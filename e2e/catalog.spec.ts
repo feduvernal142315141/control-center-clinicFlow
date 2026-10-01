@@ -60,3 +60,23 @@ test('dashboard: bloque Trials con vencidos y por vencer', async ({ page }) => {
   await expect(page.getByText('Pago vencido')).toBeVisible();
   await expect(page.getByText('Activa').first()).toBeVisible();
 });
+
+test('desactivar un módulo comercial muestra el uso y exige motivo', async ({ page }) => {
+  await loginAsAdmin(page, '/modulos/m-marketing-campaigns');
+  await expect(page.getByRole('button', { name: /Borrar/ })).toHaveCount(0);
+  await page.getByLabel('Activo').uncheck();
+  await page.getByRole('button', { name: 'Guardar módulo' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Desactivar módulo' });
+  await expect(dialog.getByTestId('usage-count')).toContainText('lo tiene');
+  await dialog.getByLabel('Motivo (obligatorio)').fill('Campañas se pausan este trimestre');
+  await dialog.getByRole('button', { name: 'Desactivar módulo' }).click();
+  await expect(page).toHaveURL('/modulos');
+  await expect(page.getByRole('row', { name: /Campañas/ }).getByText('Inactivo')).toBeVisible();
+});
+
+test('la matriz solo ofrece los límites del catálogo', async ({ page }) => {
+  await loginAsAdmin(page, '/planes/p-pro');
+  await expect(page.getByTestId('matrix-row-GROWTH_REVIEWS')).toContainText('No admite límites');
+  const selects = page.getByLabel('Límite de COMMS_WHATSAPP');
+  await expect(selects).toHaveCount(2);
+});

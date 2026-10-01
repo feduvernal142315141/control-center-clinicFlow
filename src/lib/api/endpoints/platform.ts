@@ -7,6 +7,7 @@ import {
   effectiveModuleSchema,
   planSchema,
   platformMeSchema,
+  moduleUsageSchema,
   platformModuleSchema,
   specialtySchema,
   type ChangeSpecialtyInput,
@@ -110,11 +111,10 @@ export const platformApi = {
       body: input,
       schema: platformModuleSchema,
     }),
-  deleteModule: (moduleId: string, input: ReasonInput) =>
-    platformRequest(`/modules/${encodeURIComponent(moduleId)}`, {
-      method: 'DELETE',
-      body: input,
-      schema: undefined,
+  moduleUsage: (moduleId: string, signal?: AbortSignal) =>
+    platformRequest(`/modules/${encodeURIComponent(moduleId)}/usage`, {
+      schema: moduleUsageSchema,
+      signal,
     }),
 
   // ---- Especialidades ----

@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithClient, setupMockApi } from '@test/render';
 import { getDb } from '@/mocks/db';
 import { ModuleForm } from './module-form';
@@ -10,13 +10,15 @@ const push = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push, replace: vi.fn() }) }));
 
 const server = setupMockApi();
+beforeEach(() => push.mockReset());
 const API = 'http://localhost:3000/api/platform';
 
 function renderEdit(code: string) {
   const catalog = structuredClone(getDb().modules);
   const target = catalog.find((m) => m.code === code)!;
-  renderWithClient(<ModuleForm module={target} catalog={catalog} />);
-  return { target, user: userEvent.setup() };
+  const reload = vi.fn(async () => getDb().modules.find((m) => m.code === code)!.version);
+  renderWithClient(<ModuleForm module={target} catalog={catalog} reload={reload} />);
+  return { target, reload, user: userEvent.setup() };
 }
 
 const depCheckbox = (code: string) =>
@@ -25,7 +27,7 @@ const depCheckbox = (code: string) =>
   });
 
 describe('ModuleForm: core obligatorio', () => {
-  it('no se puede desactivar, dejar de ser core ni borrar', () => {
+  it('no se puede desactivar ni dejar de ser core; no existe borrar', () => {
     renderEdit('CORE_PATIENTS');
     expect(screen.getByLabelText('Activo')).toBeDisabled();
     expect(screen.getByLabelText('Activo')).toBeChecked();
@@ -104,24 +106,66 @@ describe('ModuleForm: editor de dependencias', () => {
   });
 });
 
-describe('ModuleForm: borrar', () => {
-  it('exige motivo y muestra el rechazo del backend (dependientes)', async () => {
+describe('ModuleForm: desactivar (D14)', () => {
+  it('muestra cuántas clínicas lo usan (primeras 10 con link) y exige motivo', async () => {
+    const bodies: unknown[] = [];
+    server.events.on('request:start', async ({ request }) => {
+      if (request.method === 'PUT') bodies.push(await request.clone().json());
+    });
     const { user } = renderEdit('COMMS_WHATSAPP');
-    await user.click(screen.getByRole('button', { name: 'Borrar módulo' }));
-    const dialog = screen.getByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: 'Borrar módulo' }));
+    expect(screen.queryByRole('button', { name: /Borrar/ })).not.toBeInTheDocument();
+    await user.click(screen.getByLabelText('Activo'));
+    await user.click(screen.getByRole('button', { name: 'Guardar módulo' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Desactivar módulo' });
+    const count = await within(dialog).findByTestId('usage-count');
+    expect(count).toHaveTextContent(/^\d+ clínicas lo tienen ON hoy\.$/);
+    const links = within(
+      within(dialog).getByRole('list', { name: 'Clínicas afectadas' }),
+    ).getAllByRole('link');
+    expect(links.length).toBeLessThanOrEqual(10);
+    expect(links[0]).toHaveAttribute('href', expect.stringMatching(/^\/clinicas\/c-/));
+    expect(bodies).toHaveLength(0);
+
+    await user.click(within(dialog).getByRole('button', { name: 'Desactivar módulo' }));
     expect(
       await within(dialog).findByText('El motivo debe tener al menos 10 caracteres'),
     ).toBeInTheDocument();
-    await user.type(
-      within(dialog).getByLabelText('Motivo (obligatorio)'),
-      'Ya no se ofrece WhatsApp',
-    );
-    await user.click(within(dialog).getByRole('button', { name: 'Borrar módulo' }));
-    expect(
-      await within(dialog).findByText(/AI_RECEPTIONIST depende\(n\) de COMMS_WHATSAPP/),
-    ).toBeInTheDocument();
-    expect(getDb().modules.some((m) => m.code === 'COMMS_WHATSAPP')).toBe(true);
+    await user.type(within(dialog).getByLabelText('Motivo (obligatorio)'), 'Se pausa WhatsApp');
+    await user.click(within(dialog).getByRole('button', { name: 'Desactivar módulo' }));
+    await vi.waitFor(() => expect(push).toHaveBeenCalledWith('/modulos'));
+    expect(bodies[0]).toMatchObject({ active: false, reason: 'Se pausa WhatsApp', version: 1 });
+  });
+
+  it('guardar sin desactivar no abre el modal', async () => {
+    const { user } = renderEdit('GROWTH_REVIEWS');
+    await user.clear(screen.getByLabelText('Nombre'));
+    await user.type(screen.getByLabelText('Nombre'), 'Reseñas');
+    await user.click(screen.getByRole('button', { name: 'Guardar módulo' }));
+    await vi.waitFor(() => expect(push).toHaveBeenCalledWith('/modulos'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('ModuleForm: VERSION_CONFLICT (D16)', () => {
+  it('avisa, recarga y conserva lo editado', async () => {
+    const { user, reload } = renderEdit('GROWTH_REVIEWS');
+    getDb().modules.find((m) => m.code === 'GROWTH_REVIEWS')!.version = 7; // otro editó
+    await user.clear(screen.getByLabelText('Nombre'));
+    await user.type(screen.getByLabelText('Nombre'), 'Reseñas Google');
+    await user.click(screen.getByRole('button', { name: 'Guardar módulo' }));
+    expect(await screen.findByTestId('version-conflict')).toBeInTheDocument();
+    expect(reload).toHaveBeenCalled();
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Reseñas Google');
+    expect(push).not.toHaveBeenCalled();
+
+    // Guardar de nuevo usa la versión recargada y funciona.
+    await user.click(screen.getByRole('button', { name: 'Guardar módulo' }));
+    await vi.waitFor(() => expect(push).toHaveBeenCalledWith('/modulos'));
+    expect(getDb().modules.find((m) => m.code === 'GROWTH_REVIEWS')).toMatchObject({
+      name: 'Reseñas Google',
+      version: 8,
+    });
   });
 });
 

@@ -17,6 +17,7 @@ import {
   type Dashboard,
   type ModuleOverride,
   type Page,
+  type PlanModule,
   type PlatformMe,
 } from '@/lib/api/schemas';
 import { MOCK_TOTP_CODE, type MockUser } from './data';
@@ -184,6 +185,33 @@ function validateDependencies(db: MockDb, code: string, dependsOn: string[]) {
     });
   }
   return null;
+}
+
+/** D16: control de concurrencia optimista. */
+function versionConflict(entity: string, currentVersion: number) {
+  return err(
+    409,
+    'VERSION_CONFLICT',
+    `${entity} fue modificado por otra persona. Recarga y vuelve a intentar.`,
+    { currentVersion },
+  );
+}
+
+/** D15: solo claves de `allowedLimits` del módulo. */
+function validateLimits(db: MockDb, modules: PlanModule[]) {
+  const fields: { field: string; message: string }[] = [];
+  modules.forEach((pm, i) => {
+    const allowed = db.modules.find((m) => m.code === pm.moduleCode)?.allowedLimits ?? [];
+    for (const key of Object.keys(pm.limits ?? {})) {
+      if (!allowed.some((l) => l.key === key)) {
+        fields.push({
+          field: `modules.${i}.limits.${key}`,
+          message: `${pm.moduleCode} no admite el límite ${key}`,
+        });
+      }
+    }
+  });
+  return fields.length ? err(400, 'VALIDATION_ERROR', 'Límites no permitidos.', { fields }) : null;
 }
 
 function findClinic(db: MockDb, id: string) {
@@ -593,6 +621,7 @@ export function createPlatformHandlers(
         const plan = {
           ...body.data,
           id: nextId(db, 'p'),
+          version: 1,
           // Un plan nuevo arranca solo con los core.
           modules: db.modules.map((m) => ({ moduleCode: m.code, enabled: m.requiredCore })),
         };
@@ -625,8 +654,12 @@ export function createPlatformHandlers(
         // El code no viene en el body: no se puede editar.
         const body = await parseBody(request, planUpdateInputSchema);
         if ('response' in body) return body.response;
+        const { version, ...fields } = body.data;
+        if (version !== plan.version) return versionConflict('El plan', plan.version);
         const before = structuredClone(plan);
-        Object.assign(plan, body.data);
+        Object.assign(plan, fields);
+        if (!fields.description) delete plan.description;
+        plan.version += 1;
         audit(db, request, user, {
           action: 'PLAN_UPDATED',
           clinicId: null,
@@ -671,6 +704,9 @@ export function createPlatformHandlers(
         if (!plan) return notFound('Plan');
         const body = await parseBody(request, planModulesInputSchema);
         if ('response' in body) return body.response;
+        if (body.data.version !== plan.version) return versionConflict('El plan', plan.version);
+        const badLimits = validateLimits(db, body.data.modules);
+        if (badLimits) return badLimits;
         for (const pm of body.data.modules) {
           if (!db.modules.some((x) => x.code === pm.moduleCode)) {
             return notFound(`Módulo ${pm.moduleCode}`);
@@ -697,6 +733,7 @@ export function createPlatformHandlers(
         // Las dependencias faltantes NO se rechazan: se resuelven en módulos efectivos.
         const before = plan.modules;
         plan.modules = next;
+        plan.version += 1;
         audit(db, request, user, {
           action: 'PLAN_MODULES_UPDATED',
           clinicId: null,
@@ -737,10 +774,13 @@ export function createPlatformHandlers(
         }
         const invalid = validateDependencies(db, input.code, input.dependsOn);
         if (invalid) return invalid;
-        const saved = { ...input, id: nextId(db, 'm') };
+        const saved = { ...input, id: nextId(db, 'm'), allowedLimits: [], version: 1 };
         db.modules.push(saved);
-        for (const plan of db.plans)
+        // D13: se agrega a todos los planes en OFF (en ON si es core).
+        for (const plan of db.plans) {
           plan.modules.push({ moduleCode: saved.code, enabled: saved.requiredCore });
+          plan.version += 1;
+        }
         audit(db, request, user, {
           action: 'MODULE_CREATED',
           clinicId: null,
@@ -761,7 +801,8 @@ export function createPlatformHandlers(
         // El code no viene en el body: no se puede editar.
         const body = await parseBody(request, moduleUpdateInputSchema);
         if ('response' in body) return body.response;
-        const input = body.data;
+        const { version, reason, ...input } = body.data;
+        if (version !== existing.version) return versionConflict('El módulo', existing.version);
         if (existing.requiredCore && (!input.active || !input.requiredCore)) {
           return err(
             409,
@@ -769,16 +810,26 @@ export function createPlatformHandlers(
             'Un módulo core obligatorio no se puede desactivar ni dejar de ser core.',
           );
         }
+        // D14: desactivar un módulo comercial exige motivo.
+        if (existing.active && !input.active && !reason) {
+          return err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
+            fields: [{ field: 'reason', message: 'El motivo es obligatorio para desactivar' }],
+          });
+        }
         const invalid = validateDependencies(db, existing.code, input.dependsOn);
         if (invalid) return invalid;
         const before = structuredClone(existing);
         Object.assign(existing, input);
         if (!input.description) delete existing.description;
+        existing.version += 1;
         // Un módulo que pasa a core queda ON en todos los planes.
-        if (existing.requiredCore) {
+        if (existing.requiredCore && !before.requiredCore) {
           for (const plan of db.plans) {
             const pm = plan.modules.find((x) => x.moduleCode === existing.code);
-            if (pm) pm.enabled = true;
+            if (pm && !pm.enabled) {
+              pm.enabled = true;
+              plan.version += 1;
+            }
           }
         }
         audit(db, request, user, {
@@ -788,49 +839,27 @@ export function createPlatformHandlers(
           entityId: existing.id,
           before,
           after: existing,
+          reason: reason ?? null,
         });
         return HttpResponse.json(existing);
       }),
     ),
 
-    http.delete(
-      u('/modules/:moduleId'),
-      authed(async ({ db, user, request, params }) => {
+    // D14: en V1 un módulo no se borra, solo se desactiva. Uso actual para el modal.
+    http.get(
+      u('/modules/:moduleId/usage'),
+      authed(({ db, params }) => {
         const m = db.modules.find((x) => x.id === params.moduleId);
         if (!m) return notFound('Módulo');
-        const body = await parseBody(request, reasonInputSchema);
-        if ('response' in body) return body.response;
-        if (m.requiredCore) {
-          return err(
-            409,
-            'REQUIRED_CORE_IMMUTABLE',
-            'Un módulo core obligatorio no se puede borrar.',
-          );
-        }
-        const dependents = db.modules
-          .filter((x) => x.dependsOn.includes(m.code))
-          .map((x) => x.code);
-        if (dependents.length) {
-          return err(
-            409,
-            'MODULE_HAS_DEPENDENTS',
-            `No se puede borrar: ${dependents.join(', ')} depende(n) de ${m.code}.`,
-            { dependents },
-          );
-        }
-        db.modules = db.modules.filter((x) => x.id !== m.id);
-        for (const plan of db.plans)
-          plan.modules = plan.modules.filter((pm) => pm.moduleCode !== m.code);
-        audit(db, request, user, {
-          action: 'MODULE_DELETED',
-          clinicId: null,
-          entityType: 'Module',
-          entityId: m.id,
-          before: m,
-          after: null,
-          reason: body.data.reason,
+        const using = db.clinics
+          .filter((c) =>
+            resolveEffectiveModules(db, c.id)?.some((e) => e.code === m.code && e.enabled),
+          )
+          .sort((x, y) => x.name.localeCompare(y.name, 'es'));
+        return HttpResponse.json({
+          clinicCount: using.length,
+          clinics: using.slice(0, 10).map((c) => ({ clinicId: c.id, name: c.name, slug: c.slug })),
         });
-        return new HttpResponse(null, { status: 204 });
       }),
     ),
 

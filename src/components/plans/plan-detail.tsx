@@ -45,6 +45,11 @@ export function PlanDetail({ planId }: { planId: string }) {
   if (!plan.data || !modules.data) return <LoadingState rows={8} label="Cargando plan…" />;
 
   const p = plan.data;
+  // Recarga tras VERSION_CONFLICT y devuelve la versión vigente (D16).
+  const reload = async () => {
+    const [fresh] = await Promise.all([plan.refetch(), modules.refetch()]);
+    return fresh.data?.version;
+  };
   return (
     <>
       <Button asChild variant="link" className="mb-2 h-auto px-0 text-muted-foreground">
@@ -66,23 +71,20 @@ export function PlanDetail({ planId }: { planId: string }) {
             <CardTitle>Datos del plan</CardTitle>
           </CardHeader>
           <CardContent>
-            <PlanForm key={plan.dataUpdatedAt} plan={p} />
+            {/* Sin `key` por versión: remontar borraría lo que el usuario está editando. */}
+            <PlanForm plan={p} reload={reload} />
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
             <CardTitle>Módulos del plan</CardTitle>
             <CardDescription>
-              Los módulos core obligatorios están siempre incluidos. Los límites son opcionales: un
-              número o “ilimitado”.
+              Los módulos core obligatorios están siempre incluidos. Cada módulo solo admite los
+              límites que define el catálogo: un número o “ilimitado”.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <PlanMatrix
-              key={`${plan.dataUpdatedAt}-${modules.dataUpdatedAt}`}
-              plan={p}
-              catalog={modules.data}
-            />
+            <PlanMatrix plan={p} catalog={modules.data} reload={reload} />
           </CardContent>
         </Card>
       </div>

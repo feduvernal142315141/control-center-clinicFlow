@@ -11,7 +11,7 @@ import { FormField } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useCreatePlan, useUpdatePlan } from '@/lib/api/hooks/use-catalog-admin';
-import { errorMessage, fieldErrorsOf } from '@/lib/api/errors';
+import { errorMessage, fieldErrorsOf, isVersionConflict } from '@/lib/api/errors';
 import {
   planCreateInputSchema,
   type Plan,
@@ -19,9 +19,11 @@ import {
   type PlanUpdateInput,
 } from '@/lib/api/schemas';
 import { applyFieldErrors } from '@/lib/forms';
+import { useOptimisticVersion } from '@/lib/use-optimistic-version';
+import { ConflictBanner } from '@/components/shared/conflict-banner';
 
 function GlobalError({ error }: { error: unknown }) {
-  if (!error || fieldErrorsOf(error).length > 0) return null;
+  if (!error || fieldErrorsOf(error).length > 0 || isVersionConflict(error)) return null;
   return (
     <Alert variant="destructive">
       <AlertTriangle />
@@ -30,8 +32,27 @@ function GlobalError({ error }: { error: unknown }) {
   );
 }
 
-/** Crear: incluye `code`. Editar: el `code` se muestra, pero no se puede cambiar. */
-export function PlanForm({ plan }: { plan?: Plan }) {
+const toValues = (plan?: Plan): PlanCreateInput => ({
+  code: plan?.code ?? '',
+  name: plan?.name ?? '',
+  description: plan?.description ?? '',
+  active: plan?.active ?? true,
+  sortOrder: plan?.sortOrder ?? 50,
+});
+
+const NEW_PLAN = { version: 0 };
+
+/**
+ * Crear: incluye `code`. Editar: el `code` se muestra, pero no se puede cambiar, y se
+ * guarda con `version` (D16). `reload` recarga el plan y devuelve su versión actual.
+ */
+export function PlanForm({
+  plan,
+  reload,
+}: {
+  plan?: Plan;
+  reload?: () => Promise<number | undefined>;
+}) {
   const router = useRouter();
   const create = useCreatePlan();
   const update = useUpdatePlan(plan?.id ?? '');
@@ -40,29 +61,31 @@ export function PlanForm({ plan }: { plan?: Plan }) {
   const form = useForm<PlanCreateInput>({
     // Al editar, `code` lleva el valor actual (válido) y no se envía al backend.
     resolver: zodResolver(planCreateInputSchema),
-    defaultValues: {
-      code: plan?.code ?? '',
-      name: plan?.name ?? '',
-      description: plan?.description ?? '',
-      active: plan?.active ?? true,
-      sortOrder: plan?.sortOrder ?? 50,
-    },
+    defaultValues: toValues(plan),
   });
   const { errors, isDirty } = form.formState;
+  const versioning = useOptimisticVersion<{ version: number } & Partial<Plan>>(plan ?? NEW_PLAN, {
+    isDirty,
+    resetTo: (server) => form.reset(toValues(server as Plan)),
+  });
 
   const onSubmit = form.handleSubmit((values) => {
-    const fields: PlanUpdateInput = {
+    const fields = {
       name: values.name,
       description: values.description || undefined,
       active: values.active,
       sortOrder: values.sortOrder,
     };
-    const onError = (e: unknown) => applyFieldErrors(e, form.setError);
+    const onError = (e: unknown) => {
+      if (isVersionConflict(e) && reload) void versioning.onConflict(reload);
+      else applyFieldErrors(e, form.setError);
+    };
     if (plan) {
-      update.mutate(fields, {
+      const input: PlanUpdateInput = { ...fields, version: versioning.baseVersion };
+      update.mutate(input, {
         onSuccess: (saved) => {
           toast.success('Plan actualizado');
-          form.reset({ ...values, description: saved.description ?? '' });
+          versioning.onSaved(saved);
         },
         onError,
       });
@@ -82,7 +105,15 @@ export function PlanForm({ plan }: { plan?: Plan }) {
 
   return (
     <form noValidate onSubmit={onSubmit} className="grid gap-4 sm:grid-cols-2">
-      <div className="sm:col-span-2">
+      <div className="space-y-2 sm:col-span-2">
+        {versioning.conflict && (
+          <ConflictBanner
+            onDiscard={() => {
+              update.reset();
+              versioning.discard();
+            }}
+          />
+        )}
         <GlobalError error={mutation.error} />
       </div>
       <FormField

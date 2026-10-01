@@ -27,11 +27,12 @@ describe('PlanForm', () => {
     );
     const created = getDb().plans.find((p) => p.code === 'PRO_ANUAL')!;
     // Un plan nuevo arranca solo con los core.
-    expect(created.modules.filter((m) => m.enabled).map((m) => m.moduleCode)).toEqual([
-      'CORE_PATIENTS',
-      'CORE_APPOINTMENTS',
-      'CORE_CLINICAL_RECORDS',
-    ]);
+    expect(created.modules.filter((m) => m.enabled).map((m) => m.moduleCode)).toEqual(
+      getDb()
+        .modules.filter((m) => m.requiredCore)
+        .map((m) => m.code),
+    );
+    expect(created.version).toBe(1);
   });
 
   it('editar: el code es de solo lectura y no se envía', async () => {
@@ -52,6 +53,29 @@ describe('PlanForm', () => {
     await user.click(screen.getByRole('button', { name: 'Guardar datos del plan' }));
     await vi.waitFor(() => expect(bodies).toHaveLength(1));
     expect(bodies[0]).not.toHaveProperty('code');
+    expect(bodies[0]).toMatchObject({ version: 1 });
     expect(getDb().plans.find((p) => p.code === 'PRO')!.name).toBe('Pro 2026');
+  });
+
+  it('VERSION_CONFLICT: avisa, recarga, conserva lo editado y permite descartar', async () => {
+    const user = userEvent.setup();
+    const reload = vi.fn(async () => 3);
+    getDb().plans.find((p) => p.code === 'PRO')!.version = 3; // otro guardó
+    renderWithClient(
+      <PlanForm
+        plan={structuredClone({ ...getDb().plans.find((p) => p.code === 'PRO')!, version: 1 })}
+        reload={reload}
+      />,
+    );
+    await user.clear(screen.getByLabelText('Nombre'));
+    await user.type(screen.getByLabelText('Nombre'), 'Pro nuevo');
+    await user.click(screen.getByRole('button', { name: 'Guardar datos del plan' }));
+    expect(await screen.findByText('Alguien modificó esto mientras editabas')).toBeInTheDocument();
+    expect(reload).toHaveBeenCalled();
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Pro nuevo');
+
+    await user.click(screen.getByRole('button', { name: 'Descartar mis cambios' }));
+    expect(screen.getByLabelText('Nombre')).toHaveValue('Pro');
+    expect(screen.queryByTestId('version-conflict')).not.toBeInTheDocument();
   });
 });

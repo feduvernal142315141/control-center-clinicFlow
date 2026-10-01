@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { platformApi } from '../endpoints/platform';
 import { queryKeys } from '../query-keys';
-import type { ModuleUpdateInput, PlanModulesInput, PlanUpdateInput, ReasonInput } from '../schemas';
+import type { ModuleUpdateInput, PlanModulesInput, PlanUpdateInput } from '../schemas';
 
 export function useModules() {
   return useQuery({
@@ -58,7 +58,7 @@ export function useUpdatePlanModules(planId: string) {
   const invalidate = useInvalidateCatalog();
   return useMutation({
     mutationFn: (input: PlanModulesInput) => platformApi.updatePlanModules(planId, input),
-    meta: { errorToast: 'No se pudo guardar la matriz del plan' },
+    meta: { errorToast: false }, // el componente maneja VERSION_CONFLICT y los demás errores
     onSuccess: invalidate,
   });
 }
@@ -81,11 +81,12 @@ export function useUpdateModule(moduleId: string) {
   });
 }
 
-export function useDeleteModule(moduleId: string) {
-  const invalidate = useInvalidateCatalog();
-  return useMutation({
-    mutationFn: (input: ReasonInput) => platformApi.deleteModule(moduleId, input),
-    meta: { errorToast: false },
-    onSuccess: invalidate,
+/** Clínicas con el módulo ON hoy. Se pide solo al abrir el modal de desactivar (D14). */
+export function useModuleUsage(moduleId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.moduleUsage(moduleId),
+    queryFn: ({ signal }) => platformApi.moduleUsage(moduleId, signal),
+    enabled,
+    staleTime: 0,
   });
 }

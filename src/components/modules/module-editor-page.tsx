@@ -43,7 +43,15 @@ export function ModuleEditorPage({ moduleId }: { moduleId?: string }) {
         title={current ? current.name : 'Nuevo módulo'}
         description={current ? current.code : 'Agrega una capacidad al catálogo.'}
       />
-      <ModuleForm key={modules.dataUpdatedAt} module={current} catalog={modules.data} />
+      {/* Sin `key` por versión: remontar borraría lo que el usuario está editando. */}
+      <ModuleForm
+        module={current}
+        catalog={modules.data}
+        reload={async () => {
+          const fresh = await modules.refetch();
+          return fresh.data?.find((m) => m.id === moduleId)?.version;
+        }}
+      />
     </>
   );
 }

@@ -149,6 +149,7 @@ describe('handlers', () => {
       body: JSON.stringify({
         modules: [{ moduleCode: 'CORE_PATIENTS', enabled: false }],
         reason: 'Intento de apagar un core',
+        version: 1,
       }),
     });
     expect(res.status).toBe(409);
@@ -175,7 +176,7 @@ describe('handlers', () => {
   it('MODULE_DEPENDENCY_SELF y MODULE_DEPENDENCY_CYCLE', async () => {
     const token = await login();
     const odontogram = getDb().modules.find((m) => m.code === 'DENTAL_ODONTOGRAM')!;
-    const { id: _id, ...input } = odontogram;
+    const { id: _id, allowedLimits: _limits, ...input } = odontogram;
     const self = await call(`/modules/${odontogram.id}`, {
       method: 'PUT',
       token,
@@ -362,5 +363,124 @@ describe('vista previa de módulos efectivos', () => {
     const token = await login();
     const res = await call('/clinics/c-darmas/effective-modules?planCode=NOPE', { token });
     expect(res.status).toBe(404);
+  });
+});
+
+describe('BO3: D13–D16', () => {
+  const put = (token: string, path: string, body: unknown) =>
+    call(path, { method: 'PUT', token, body: JSON.stringify(body) });
+
+  it('D13: un módulo nuevo se agrega a todos los planes en OFF (core en ON)', async () => {
+    const token = await login();
+    const base = {
+      name: 'Nuevo',
+      category: 'COMMS',
+      active: true,
+      compatibleSpecialties: [],
+      dependsOn: [],
+    };
+    const before = getDb().plans.map((p) => p.version);
+    await call('/modules', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ ...base, code: 'COMMS_SMS', requiredCore: false }),
+    });
+    await call('/modules', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ ...base, code: 'CORE_BILLING', requiredCore: true }),
+    });
+    for (const [i, plan] of getDb().plans.entries()) {
+      expect(plan.modules.find((m) => m.moduleCode === 'COMMS_SMS')).toEqual({
+        moduleCode: 'COMMS_SMS',
+        enabled: false,
+      });
+      expect(plan.modules.find((m) => m.moduleCode === 'CORE_BILLING')?.enabled).toBe(true);
+      expect(plan.version).toBe(before[i] + 2);
+    }
+  });
+
+  it('D14: no hay DELETE de módulos; usage lista clínicas con el módulo ON', async () => {
+    const token = await login();
+    await expect(call('/modules/m-comms-whatsapp', { method: 'DELETE', token })).rejects.toThrow(
+      'Sin handler',
+    );
+    const usage = await (await call('/modules/m-comms-whatsapp/usage', { token })).json();
+    expect(usage.clinicCount).toBeGreaterThan(0);
+    expect(usage.clinics.length).toBe(Math.min(10, usage.clinicCount));
+    expect(usage.clinics[0]).toEqual({
+      clinicId: expect.any(String),
+      name: expect.any(String),
+      slug: expect.any(String),
+    });
+    // c-lara tiene WhatsApp OFF por override: no cuenta.
+    expect(usage.clinics.map((c: { clinicId: string }) => c.clinicId)).not.toContain('c-lara');
+  });
+
+  it('D14: desactivar exige motivo; un core no se desactiva', async () => {
+    const token = await login();
+    const m = getDb().modules.find((x) => x.code === 'GROWTH_REVIEWS')!;
+    const { id: _i, code: _c, allowedLimits: _a, ...fields } = structuredClone(m);
+    const noReason = await put(token, `/modules/${m.id}`, { ...fields, active: false });
+    expect((await noReason.json()).details.fields[0].field).toBe('reason');
+    const ok = await put(token, `/modules/${m.id}`, {
+      ...fields,
+      active: false,
+      reason: 'Se retira la integración con Google',
+    });
+    expect(await ok.json()).toMatchObject({ active: false, version: 2 });
+
+    const core = getDb().modules.find((x) => x.code === 'CORE_PATIENTS')!;
+    const { id: _i2, code: _c2, allowedLimits: _a2, ...coreFields } = structuredClone(core);
+    const res = await put(token, `/modules/${core.id}`, {
+      ...coreFields,
+      active: false,
+      reason: 'Intento de desactivar un core',
+    });
+    expect((await res.json()).code).toBe('REQUIRED_CORE_IMMUTABLE');
+  });
+
+  it('D15: GET /modules trae allowedLimits; la matriz rechaza claves no permitidas', async () => {
+    const token = await login();
+    const modules = await (await call('/modules', { token })).json();
+    const wa = modules.find((m: { code: string }) => m.code === 'COMMS_WHATSAPP');
+    expect(wa.allowedLimits.map((l: { key: string }) => l.key)).toEqual([
+      'maxWhatsAppNumbers',
+      'maxMonthlyMessages',
+    ]);
+    const res = await put(token, '/plans/p-basic/modules', {
+      modules: [{ moduleCode: 'GROWTH_REVIEWS', enabled: true, limits: { maxReviews: 5 } }],
+      reason: 'Prueba de límite no permitido',
+      version: 1,
+    });
+    const body = await res.json();
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.details.fields[0].message).toContain('maxReviews');
+  });
+
+  it('D16: plan, matriz y módulo responden VERSION_CONFLICT con versión vieja', async () => {
+    const token = await login();
+    const plan = getDb().plans.find((p) => p.id === 'p-pro')!;
+    const fields = { name: 'Pro', active: true, sortOrder: 20 };
+    const ok = await put(token, '/plans/p-pro', { ...fields, version: 1 });
+    expect((await ok.json()).version).toBe(2);
+    const stale = await put(token, '/plans/p-pro', { ...fields, version: 1 });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({
+      code: 'VERSION_CONFLICT',
+      details: { currentVersion: 2 },
+    });
+
+    const matrix = await put(token, '/plans/p-pro/modules', {
+      modules: plan.modules,
+      reason: 'Matriz con versión vieja',
+      version: 1,
+    });
+    expect((await matrix.json()).code).toBe('VERSION_CONFLICT');
+
+    const m = getDb().modules.find((x) => x.code === 'GROWTH_REVIEWS')!;
+    const { id: _i, code: _c, allowedLimits: _a, ...mf } = structuredClone(m);
+    const modStale = await put(token, `/modules/${m.id}`, { ...mf, version: 99 });
+    expect((await modStale.json()).code).toBe('VERSION_CONFLICT');
   });
 });

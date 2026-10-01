@@ -1,13 +1,9 @@
 import { z } from 'zod';
-import { reasonSchema } from './common';
+import { reasonSchema, versionSchema } from './common';
 import { moduleCodeSchema } from './module';
 
-/** Límite por módulo: entero ≥ 0, o `null` = ilimitado. */
+/** Límite por módulo: entero ≥ 0, o `null` = ilimitado. Clave ∈ `allowedLimits` del módulo (D15). */
 export const limitValueSchema = z.number().int().nonnegative().nullable();
-
-export const limitKeySchema = z
-  .string()
-  .regex(/^[a-z][a-zA-Z0-9]*$/, 'Usa camelCase: letras y números, empezando en minúscula');
 
 export const planModuleSchema = z.object({
   moduleCode: moduleCodeSchema,
@@ -31,6 +27,8 @@ export const planSchema = z.object({
   active: z.boolean(),
   sortOrder: z.number().int(),
   modules: z.array(planModuleSchema),
+  /** Una sola versión para datos y matriz del plan (D16). */
+  version: versionSchema,
 });
 export type Plan = z.infer<typeof planSchema>;
 
@@ -46,12 +44,13 @@ export const planCreateInputSchema = z.object({ code: planCodeSchema, ...planFie
 export type PlanCreateInput = z.infer<typeof planCreateInputSchema>;
 
 /** PUT /platform/plans/{id}: el `code` no se edita después de creado. */
-export const planUpdateInputSchema = z.object(planFields);
+export const planUpdateInputSchema = z.object({ ...planFields, version: versionSchema });
 export type PlanUpdateInput = z.infer<typeof planUpdateInputSchema>;
 
 /** PUT /platform/plans/{id}/modules: matriz completa + motivo (cambio comercial). */
 export const planModulesInputSchema = z.object({
   modules: z.array(planModuleSchema),
   reason: reasonSchema,
+  version: versionSchema,
 });
 export type PlanModulesInput = z.infer<typeof planModulesInputSchema>;

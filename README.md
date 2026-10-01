@@ -126,14 +126,15 @@ La app (`src/app`, `src/components`, `src/lib`) no puede importar `@/mocks/*` ni
 
 Formato del backend: `{ code, message, details? }`. El cliente nunca se traga errores:
 
-| Situación                               | Código                                                      |
-| --------------------------------------- | ----------------------------------------------------------- |
-| Sin red                                 | `NETWORK_ERROR`                                             |
-| Backend caído                           | `BACKEND_UNAVAILABLE` (502 del BFF)                         |
-| Respuesta que no cumple el contrato zod | `CONTRACT_MISMATCH`                                         |
-| Cuerpo no-JSON                          | `UNEXPECTED_RESPONSE`                                       |
-| Sesión caída / token no de plataforma   | `UNAUTHENTICATED` / `PLATFORM_FORBIDDEN` → logout + login   |
-| `VALIDATION_ERROR`                      | `details.fields[] = { field, message }` → errores por campo |
+| Situación                               | Código                                                           |
+| --------------------------------------- | ---------------------------------------------------------------- |
+| Sin red                                 | `NETWORK_ERROR`                                                  |
+| Backend caído                           | `BACKEND_UNAVAILABLE` (502 del BFF)                              |
+| Respuesta que no cumple el contrato zod | `CONTRACT_MISMATCH`                                              |
+| Cuerpo no-JSON                          | `UNEXPECTED_RESPONSE`                                            |
+| Sesión caída / token no de plataforma   | `UNAUTHENTICATED` / `PLATFORM_FORBIDDEN` → logout + login        |
+| `VALIDATION_ERROR`                      | `details.fields[] = { field, message }` → errores por campo      |
+| Edición sobre versión vieja (D16)       | `VERSION_CONFLICT` → aviso, recarga y se conservan las ediciones |
 
 ## Contratos propuestos al backend (además de la sección 7 del brief)
 
@@ -143,20 +144,24 @@ con `details.fields = [{field, message}]`; paginación `{content, page, size, to
 
 ### Decisiones de dominio (confirmadas)
 
-| #   | Decisión                                                                                                                                                                                                                                       |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1  | `operationalStatus` es solo `ACTIVE \| SUSPENDED \| INACTIVE`. **El trial no es estado operativo.**                                                                                                                                            |
-| D2  | El trial vive solo en la suscripción (`subscription.trial`, `subscription.status = 'TRIAL'`). Marcar o desmarcar trial **nunca** cambia `operationalStatus`.                                                                                   |
-| D3  | Un trial exige fecha de fin (`endsAt` en la suscripción, `trialEndsAt` al crear). Si falta → `VALIDATION_ERROR`.                                                                                                                               |
-| D4  | La suscripción se asigna por `planCode`, no por `planId`.                                                                                                                                                                                      |
-| D5  | "Reactivar" aplica igual a `SUSPENDED` e `INACTIVE` → `ACTIVE`, con motivo obligatorio. Solo se suspende una clínica `ACTIVE`.                                                                                                                 |
-| D6  | Toda acción sobre una clínica (editar nombre, plan, especialidad, suspender, reactivar) lleva `reason` y queda auditada.                                                                                                                       |
-| D7  | Los módulos efectivos los calcula el backend, incluida la vista previa. El front solo compara el estado actual con la vista previa para listar qué cambia.                                                                                     |
-| D8  | Trial vencido: la suscripción pasa a `PAST_DUE` (sigue con `trial = true`) y la clínica **sigue `ACTIVE`**. Nada se suspende solo: suspender es siempre manual.                                                                                |
-| D9  | `deniedReason` es extensible: el backend puede agregar códigos nuevos (formato `MAYUSCULAS_CON_GUION`) sin romper el front, que muestra "Motivo no reconocido: CODIGO" y registra un `console.warn`. El resto del contrato se valida estricto. |
-| D10 | El `code` de planes y módulos es inmutable: `PUT` no lo recibe.                                                                                                                                                                                |
-| D11 | Un módulo `requiredCore` no se puede desactivar, dejar de ser core ni borrar (`REQUIRED_CORE_IMMUTABLE`), y siempre está ON en todos los planes.                                                                                               |
-| D12 | Dependencias faltantes dentro de un plan **no** se rechazan al guardar la matriz: el front solo advierte y en las clínicas quedan OFF por `MISSING_DEPENDENCY`.                                                                                |
+| #   | Decisión                                                                                                                                                                                                                                                                               |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | `operationalStatus` es solo `ACTIVE \| SUSPENDED \| INACTIVE`. **El trial no es estado operativo.**                                                                                                                                                                                    |
+| D2  | El trial vive solo en la suscripción (`subscription.trial`, `subscription.status = 'TRIAL'`). Marcar o desmarcar trial **nunca** cambia `operationalStatus`.                                                                                                                           |
+| D3  | Un trial exige fecha de fin (`endsAt` en la suscripción, `trialEndsAt` al crear). Si falta → `VALIDATION_ERROR`.                                                                                                                                                                       |
+| D4  | La suscripción se asigna por `planCode`, no por `planId`.                                                                                                                                                                                                                              |
+| D5  | "Reactivar" aplica igual a `SUSPENDED` e `INACTIVE` → `ACTIVE`, con motivo obligatorio. Solo se suspende una clínica `ACTIVE`.                                                                                                                                                         |
+| D6  | Toda acción sobre una clínica (editar nombre, plan, especialidad, suspender, reactivar) lleva `reason` y queda auditada.                                                                                                                                                               |
+| D7  | Los módulos efectivos los calcula el backend, incluida la vista previa. El front solo compara el estado actual con la vista previa para listar qué cambia.                                                                                                                             |
+| D8  | Trial vencido: la suscripción pasa a `PAST_DUE` (sigue con `trial = true`) y la clínica **sigue `ACTIVE`**. Nada se suspende solo: suspender es siempre manual.                                                                                                                        |
+| D9  | `deniedReason` es extensible: el backend puede agregar códigos nuevos (formato `MAYUSCULAS_CON_GUION`) sin romper el front, que muestra "Motivo no reconocido: CODIGO" y registra un `console.warn`. El resto del contrato se valida estricto.                                         |
+| D10 | El `code` de planes y módulos es inmutable: `PUT` no lo recibe.                                                                                                                                                                                                                        |
+| D11 | Un módulo `requiredCore` no se puede desactivar ni dejar de ser core (`REQUIRED_CORE_IMMUTABLE`), y siempre está ON en todos los planes.                                                                                                                                               |
+| D12 | Dependencias faltantes dentro de un plan **no** se rechazan al guardar la matriz: el front solo advierte y en las clínicas quedan OFF por `MISSING_DEPENDENCY`.                                                                                                                        |
+| D13 | Un módulo nuevo se agrega a **todos** los planes en OFF; si es `requiredCore`, en ON.                                                                                                                                                                                                  |
+| D14 | En V1 un módulo **no se borra**: solo se desactiva (no existe `DELETE`). Desactivar un módulo comercial exige `reason`, y antes la UI muestra cuántas clínicas lo tienen ON hoy y las primeras 10 (`GET /modules/{id}/usage`).                                                         |
+| D15 | Límites con catálogo: cada módulo declara `allowedLimits: [{key, label, unit}]`. La matriz solo acepta esas claves (sin texto libre); un módulo sin `allowedLimits` no admite límites. Los define el backend (no editables en V1).                                                     |
+| D16 | Concurrencia optimista: planes y módulos traen `version`; todo `PUT` la envía. Si no coincide → 409 `VERSION_CONFLICT` con `details.currentVersion`. El plan tiene **una sola** versión para sus datos y su matriz. La UI avisa, recarga y conserva lo que el usuario estaba editando. |
 
 ### Auth
 
@@ -207,30 +212,45 @@ con `details.fields = [{field, message}]`; paginación `{content, page, size, to
 
 ### Planes (BO3)
 
-- `Plan` = `{id, code, name, description?, active, sortOrder, modules: PlanModule[]}`.
-- `PlanModule` = `{moduleCode, enabled, limits?: Record<string, number | null>}`. En `limits`, la clave va en
-  camelCase, el valor es un entero ≥ 0 y `null` = ilimitado.
+- `Plan` = `{id, code, name, description?, active, sortOrder, modules: PlanModule[], version}`.
+- `PlanModule` = `{moduleCode, enabled, limits?: Record<string, number | null>}`. Las claves de `limits` deben
+  estar en `allowedLimits` del módulo (D15); el valor es un entero ≥ 0 y `null` = ilimitado.
 - `GET /platform/plans` → `Plan[]` ordenados por `sortOrder`. `GET /platform/plans/{id}` → `Plan`.
-- `POST /platform/plans` `{code, name, description?, active, sortOrder}` → 201 `Plan`. Arranca con solo los
-  core en ON. `code`: `^[A-Z][A-Z0-9_]*$`; si está repetido → `VALIDATION_ERROR` en `code`.
-- `PUT /platform/plans/{id}` `{name, description?, active, sortOrder}` → `Plan` (sin `code`, D10).
-- `PUT /platform/plans/{id}/modules` `{modules: PlanModule[], reason}` → `Plan`. Es la matriz completa: un módulo
-  que no venga queda OFF. Un core en OFF → 409 `REQUIRED_CORE_IMMUTABLE` (D11). Las dependencias faltantes
-  no se rechazan (D12). Queda auditado con `reason`.
+- `POST /platform/plans` `{code, name, description?, active, sortOrder}` → 201 `Plan` (`version: 1`).
+  - Arranca con solo los core en ON.
+  - `code`: `^[A-Z][A-Z0-9_]*$`; si está repetido → `VALIDATION_ERROR` en `code`.
+- `PUT /platform/plans/{id}` `{name, description?, active, sortOrder, version}` → `Plan` (sin `code`, D10).
+  Si la versión es vieja → 409 `VERSION_CONFLICT` (D16).
+- `PUT /platform/plans/{id}/modules` `{modules: PlanModule[], reason, version}` → `Plan`.
+  - Es la matriz completa: un módulo que no venga queda OFF.
+  - Un core en OFF → 409 `REQUIRED_CORE_IMMUTABLE` (D11).
+  - Las dependencias faltantes no se rechazan (D12).
+  - Un límite fuera de `allowedLimits` → `VALIDATION_ERROR` (`field: modules.{i}.limits.{key}`).
+  - Versión vieja → 409 `VERSION_CONFLICT`. Queda auditado con `reason`.
+- Todo cambio en la matriz o en los datos incrementa `Plan.version`. Agregar un módulo al catálogo (D13) o
+  convertir uno en core también la incrementa.
 
 ### Módulos (BO3)
 
-- `GET /platform/modules` → `PlatformModule[]` (sección 7.2 del brief).
+- `PlatformModule` = la sección 7.2 del brief + `allowedLimits: [{key, label, unit}]` (D15) + `version` (D16).
+- `GET /platform/modules` → `PlatformModule[]`.
 - `POST /platform/modules`
-  `{code, name, description?, category, requiredCore, active, compatibleSpecialties, dependsOn}` → 201.
-  Se agrega a todos los planes (ON solo si es core). `code` repetido → `VALIDATION_ERROR` en `code`.
-- `PUT /platform/modules/{id}` → mismo body sin `code` (D10).
+  `{code, name, description?, category, requiredCore, active, compatibleSpecialties, dependsOn}` → 201
+  (`version: 1`, `allowedLimits: []`).
+  - Se agrega a todos los planes en OFF, o en ON si es core (D13).
+  - `code` repetido → `VALIDATION_ERROR` en `code`.
+- `PUT /platform/modules/{id}`
+  `{name, description?, category, requiredCore, active, compatibleSpecialties, dependsOn, version, reason?}`
+  (sin `code`, D10):
+  - `reason` es obligatorio si el cambio desactiva el módulo (`active: true → false`); si falta →
+    `VALIDATION_ERROR` en `reason` (D14).
   - Un core que se intente desactivar o dejar de ser core → 409 `REQUIRED_CORE_IMMUTABLE`.
   - Un módulo que pasa a core queda ON en todos los planes.
-- `DELETE /platform/modules/{id}` con body `{reason}` → 204.
-  - Un core → 409 `REQUIRED_CORE_IMMUTABLE`.
-  - Si otros módulos dependen de él → 409 `MODULE_HAS_DEPENDENTS` con `details.dependents: string[]`.
-  - Lo quita de todos los planes.
+  - Versión vieja → 409 `VERSION_CONFLICT`.
+- `GET /platform/modules/{id}/usage` → `{clinicCount, clinics: [{clinicId, name, slug}]}` (D14).
+  - `clinicCount`: clínicas con el módulo **efectivamente ON** hoy.
+  - `clinics`: las primeras 10, ordenadas por nombre.
+- **No hay `DELETE /platform/modules/{id}`** en V1 (D14).
 - Dependencias (en `POST`/`PUT`):
   - Auto-dependencia → 409 `MODULE_DEPENDENCY_SELF` con `details.cycle: [A, A]`.
   - Ciclo → 409 `MODULE_DEPENDENCY_CYCLE` con `details.cycle: [A, B, …, A]`.

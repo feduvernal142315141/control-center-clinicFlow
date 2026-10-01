@@ -26,3 +26,9 @@ export const reasonSchema = z
   .trim()
   .min(10, 'El motivo debe tener al menos 10 caracteres')
   .max(500, 'El motivo no puede superar 500 caracteres');
+
+/**
+ * Control de concurrencia optimista (D16): toda entidad editable trae `version` y todo PUT
+ * la devuelve. Si no coincide, el backend responde 409 VERSION_CONFLICT.
+ */
+export const versionSchema = z.number().int().nonnegative();

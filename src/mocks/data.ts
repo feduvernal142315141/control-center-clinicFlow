@@ -83,11 +83,22 @@ const mod = (
   active: true,
   compatibleSpecialties: [],
   dependsOn: [],
+  allowedLimits: [],
+  version: 1,
   ...extra,
 });
 
+const limit = (key: string, label: string, unit: string) => ({ key, label, unit });
+
 export const seedModules: PlatformModule[] = [
-  mod('CORE_PATIENTS', 'Pacientes', 'CORE', { requiredCore: true }),
+  mod('CORE_PATIENTS', 'Pacientes', 'CORE', {
+    requiredCore: true,
+    allowedLimits: [limit('maxPatients', 'Pacientes', 'pacientes')],
+  }),
+  mod('CORE_PROFESSIONALS', 'Profesionales', 'CORE', {
+    requiredCore: true,
+    allowedLimits: [limit('maxProfessionals', 'Profesionales', 'profesionales')],
+  }),
   mod('CORE_APPOINTMENTS', 'Agenda y citas', 'CORE', {
     requiredCore: true,
     dependsOn: ['CORE_PATIENTS'],
@@ -99,7 +110,13 @@ export const seedModules: PlatformModule[] = [
   mod('COMMS_EMAIL_REMINDERS', 'Recordatorios por correo', 'COMMS', {
     dependsOn: ['CORE_APPOINTMENTS'],
   }),
-  mod('COMMS_WHATSAPP', 'WhatsApp', 'COMMS', { dependsOn: ['CORE_APPOINTMENTS'] }),
+  mod('COMMS_WHATSAPP', 'WhatsApp', 'COMMS', {
+    dependsOn: ['CORE_APPOINTMENTS'],
+    allowedLimits: [
+      limit('maxWhatsAppNumbers', 'Números de WhatsApp', 'números'),
+      limit('maxMonthlyMessages', 'Mensajes por mes', 'mensajes/mes'),
+    ],
+  }),
   mod('AI_RECEPTIONIST', 'Recepcionista IA', 'AI', {
     description: 'Agenda citas por WhatsApp con IA.',
     dependsOn: ['COMMS_WHATSAPP'],
@@ -108,7 +125,10 @@ export const seedModules: PlatformModule[] = [
     active: false,
     dependsOn: ['CORE_CLINICAL_RECORDS'],
   }),
-  mod('MARKETING_CAMPAIGNS', 'Campañas', 'MARKETING', { dependsOn: ['COMMS_EMAIL_REMINDERS'] }),
+  mod('MARKETING_CAMPAIGNS', 'Campañas', 'MARKETING', {
+    dependsOn: ['COMMS_EMAIL_REMINDERS'],
+    allowedLimits: [limit('maxCampaignsPerMonth', 'Campañas por mes', 'campañas/mes')],
+  }),
   mod('GROWTH_REVIEWS', 'Reseñas en Google', 'GROWTH'),
   mod('DENTAL_ODONTOGRAM', 'Odontograma', 'SPECIALTY', { compatibleSpecialties: ['DENTAL'] }),
   mod('DENTAL_TREATMENT_PLANS', 'Planes de tratamiento', 'SPECIALTY', {
@@ -155,7 +175,11 @@ export const seedPlans: Plan[] = [
     name: 'Básico',
     active: true,
     sortOrder: 10,
-    modules: matrix(BASIC, { COMMS_EMAIL_REMINDERS: { monthlyEmails: 1000 } }),
+    modules: matrix(BASIC, {
+      CORE_PATIENTS: { maxPatients: 500 },
+      CORE_PROFESSIONALS: { maxProfessionals: 2 },
+    }),
+    version: 1,
   },
   {
     id: 'p-pro',
@@ -163,7 +187,11 @@ export const seedPlans: Plan[] = [
     name: 'Pro',
     active: true,
     sortOrder: 20,
-    modules: matrix(PRO, { COMMS_WHATSAPP: { monthlyMessages: 2000 } }),
+    modules: matrix(PRO, {
+      CORE_PROFESSIONALS: { maxProfessionals: 5 },
+      COMMS_WHATSAPP: { maxWhatsAppNumbers: 1, maxMonthlyMessages: 2000 },
+    }),
+    version: 1,
   },
   {
     id: 'p-premium',
@@ -174,10 +202,12 @@ export const seedPlans: Plan[] = [
     modules: matrix(
       seedModules.map((m) => m.code),
       {
-        AI_RECEPTIONIST: { monthlyConversations: 5000 },
-        COMMS_WHATSAPP: { monthlyMessages: null },
+        CORE_PROFESSIONALS: { maxProfessionals: null },
+        COMMS_WHATSAPP: { maxWhatsAppNumbers: 3, maxMonthlyMessages: null },
+        MARKETING_CAMPAIGNS: { maxCampaignsPerMonth: 10 },
       },
     ),
+    version: 1,
   },
   {
     id: 'p-legacy-dental',
@@ -196,6 +226,7 @@ export const seedPlans: Plan[] = [
       'DENTAL_TREATMENT_PLANS',
       'DENTAL_PERIODONTOGRAM',
     ]),
+    version: 1,
   },
 ];
 

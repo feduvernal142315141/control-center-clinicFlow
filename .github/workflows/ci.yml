@@ -41,6 +41,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm e2e
+      # Si falla, deja en el log qué había en pantalla (snapshot accesible de Playwright).
+      - name: Snapshot de los tests fallidos
+        if: failure()
+        run: |
+          find test-results -name error-context.md -print -exec cat {} \; || true
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

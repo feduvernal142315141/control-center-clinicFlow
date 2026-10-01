@@ -14,5 +14,6 @@ export async function login(page: Page, email: string, password = PASSWORD) {
 export async function loginAsAdmin(page: Page, path = '/') {
   await page.goto(`/login?next=${encodeURIComponent(path)}`);
   await login(page, 'admin@kodewave.com');
+  await expect(page).toHaveURL(path);
   await expect(page.getByTestId('user-menu')).toBeVisible();
 }

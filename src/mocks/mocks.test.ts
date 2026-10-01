@@ -202,6 +202,7 @@ describe('handlers', () => {
         specialtyCode: 'DENTAL',
         planCode: 'PRO',
         trial: false,
+        trialEndsAt: null,
         admin: { fullName: 'Admin', email: 'admin@otra.com' },
       }),
     });
@@ -218,5 +219,125 @@ describe('handlers', () => {
       });
     for (let i = 0; i < 5; i++) expect((await attempt()).status).toBe(401);
     expect((await attempt()).status).toBe(429);
+  });
+
+  it('PATCH de clínica exige motivo y lo audita', async () => {
+    const token = await login();
+    const bad = await call('/clinics/c-darmas', {
+      method: 'PATCH',
+      token,
+      body: JSON.stringify({ name: 'Nuevo nombre' }),
+    });
+    expect(bad.status).toBe(400);
+    const ok = await call('/clinics/c-darmas', {
+      method: 'PATCH',
+      token,
+      body: JSON.stringify({ name: "D'Armas Odontología", reason: 'Cambio de razón social' }),
+    });
+    expect((await ok.json()).name).toBe("D'Armas Odontología");
+    expect(getDb().auditLogs[0]).toMatchObject({
+      action: 'CLINIC_UPDATED',
+      reason: 'Cambio de razón social',
+    });
+  });
+});
+
+describe('decisiones BO2: trial e INACTIVE', () => {
+  it('ninguna clínica tiene TRIAL como estado operativo; trial vive en la suscripción', () => {
+    for (const c of getDb().clinics) {
+      expect(['ACTIVE', 'SUSPENDED', 'INACTIVE']).toContain(c.operationalStatus);
+      expect(c.trial).toBe(c.subscription?.trial ?? false);
+    }
+    expect(getDb().clinics.find((c) => c.id === 'c-vida')).toMatchObject({
+      operationalStatus: 'ACTIVE',
+      trial: true,
+    });
+  });
+
+  it('el KPI de trial se cuenta desde la suscripción', async () => {
+    const token = await login();
+    const kpis = await (await call('/dashboard', { token })).json();
+    expect(kpis.trial).toBe(getDb().clinics.filter((c) => c.subscription?.trial).length);
+    expect(kpis.active + kpis.suspended + kpis.inactive).toBe(kpis.totalClinics);
+  });
+
+  it('marcar o desmarcar trial no toca el estado operativo', async () => {
+    const token = await login();
+    const res = await call('/clinics/c-vida/subscription', {
+      method: 'PUT',
+      token,
+      body: JSON.stringify({
+        planCode: 'PRO',
+        startsAt: '2026-10-01T00:00:00-04:00',
+        endsAt: null,
+        trial: false,
+        reason: 'Pasa a plan pago',
+      }),
+    });
+    expect(await res.json()).toMatchObject({ operationalStatus: 'ACTIVE', trial: false });
+  });
+
+  it('trial sin fecha de fin → VALIDATION_ERROR', async () => {
+    const token = await login();
+    const res = await call('/clinics/c-vida/subscription', {
+      method: 'PUT',
+      token,
+      body: JSON.stringify({
+        planCode: 'PRO',
+        startsAt: '2026-10-01T00:00:00-04:00',
+        endsAt: null,
+        trial: true,
+        reason: 'Trial sin fin',
+      }),
+    });
+    const body = await res.json();
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(body.details.fields[0].field).toBe('endsAt');
+  });
+
+  it('INACTIVE se reactiva igual que SUSPENDED; no se puede suspender', async () => {
+    const token = await login();
+    const reason = JSON.stringify({ reason: 'Vuelve a operar la clínica' });
+    const suspend = await call('/clinics/c-piel-sana/suspend', {
+      method: 'POST',
+      token,
+      body: reason,
+    });
+    expect(suspend.status).toBe(409);
+    const res = await call('/clinics/c-piel-sana/reactivate', {
+      method: 'POST',
+      token,
+      body: reason,
+    });
+    expect((await res.json()).operationalStatus).toBe('ACTIVE');
+  });
+});
+
+describe('vista previa de módulos efectivos', () => {
+  it('?specialtyCode muestra cómo quedarían sin guardar nada', async () => {
+    const token = await login();
+    const res = await call('/clinics/c-darmas/effective-modules?specialtyCode=PODIATRY', { token });
+    const rows = Object.fromEntries(
+      ((await res.json()) as { code: string }[]).map((m) => [m.code, m]),
+    );
+    expect(rows.DENTAL_ODONTOGRAM).toMatchObject({
+      enabled: false,
+      deniedReason: 'SPECIALTY_INCOMPATIBLE',
+    });
+    expect(rows.PODIATRY_FOOT_EXAM).toMatchObject({ enabled: true });
+    expect(getDb().clinics.find((c) => c.id === 'c-darmas')!.specialtyCode).toBe('DENTAL');
+  });
+
+  it('?planCode usa la matriz del otro plan', async () => {
+    const token = await login();
+    const res = await call('/clinics/c-darmas/effective-modules?planCode=BASIC', { token });
+    const ai = ((await res.json()) as { code: string }[]).find((m) => m.code === 'AI_RECEPTIONIST');
+    expect(ai).toMatchObject({ enabled: false, deniedReason: 'NOT_IN_PLAN' });
+  });
+
+  it('código desconocido → 404', async () => {
+    const token = await login();
+    const res = await call('/clinics/c-darmas/effective-modules?planCode=NOPE', { token });
+    expect(res.status).toBe(404);
   });
 });

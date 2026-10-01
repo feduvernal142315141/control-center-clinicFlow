@@ -13,6 +13,8 @@ import type {
  * - Centro Podológico X: PODIATRY, PRO, módulos DENTAL_* OFF por SPECIALTY_INCOMPATIBLE.
  * - Sonrisas del Norte: SUSPENDED (todo OFF por CLINIC_SUSPENDED).
  * - Odontología Integral Lara: overrides → OVERRIDE_OFF y MISSING_DEPENDENCY.
+ * - Consultorio Médico Vida: ACTIVE con suscripción en trial (el trial no es estado operativo).
+ * - Clínica Piel Sana: INACTIVE sin plan.
  * - Plan LEGACY_DENTAL con todos los módulos actuales de la app dental.
  * - AI_CLINICAL_NOTES inactivo (MODULE_INACTIVE) y GROWTH_REVIEWS con kill switch.
  */
@@ -200,11 +202,13 @@ function clinic(
   name: string,
   slug: string,
   specialtyCode: string,
-  operationalStatus: ClinicDetail['operationalStatus'],
+  /** 'TRIAL' es solo un atajo de la semilla: clínica ACTIVE con suscripción en trial. */
+  seedStatus: ClinicDetail['operationalStatus'] | 'TRIAL',
   planCode: string | null,
   createdAt: string,
 ): ClinicDetail {
-  const trial = operationalStatus === 'TRIAL';
+  const trial = seedStatus === 'TRIAL' && planCode !== null;
+  const operationalStatus = seedStatus === 'TRIAL' ? 'ACTIVE' : seedStatus;
   return {
     id,
     name,
@@ -212,6 +216,7 @@ function clinic(
     specialtyCode,
     operationalStatus,
     planCode,
+    trial,
     createdAt,
     subscription: planCode
       ? {
@@ -248,7 +253,13 @@ const FILLER_NAMES = [
   'Dental Express Margarita',
   'Consultorio Dr. Pérez',
 ];
-const FILLER_SPECIALTIES = ['DENTAL', 'DENTAL', 'PODIATRY', 'GENERAL'] as const;
+/** Especialidad coherente con el nombre de la clínica de relleno. */
+const fillerSpecialty = (name: string) =>
+  /dent|odont|sonris|ortodon/i.test(name)
+    ? 'DENTAL'
+    : /pie|podo/i.test(name)
+      ? 'PODIATRY'
+      : 'GENERAL';
 const FILLER_PLANS = ['BASIC', 'PRO', 'PREMIUM', 'LEGACY_DENTAL'] as const;
 const FILLER_STATUS = ['ACTIVE', 'ACTIVE', 'ACTIVE', 'TRIAL', 'SUSPENDED'] as const;
 
@@ -316,7 +327,7 @@ export const seedClinics: ClinicDetail[] = [
     '2025-08-01T10:00:00-04:00',
   ),
   ...FILLER_NAMES.map((name, i) => {
-    const specialty = FILLER_SPECIALTIES[i % FILLER_SPECIALTIES.length];
+    const specialty = fillerSpecialty(name);
     const plan = specialty === 'DENTAL' ? FILLER_PLANS[i % 4] : FILLER_PLANS[i % 3];
     const day = String((i % 27) + 1).padStart(2, '0');
     const month = String((i % 9) + 1).padStart(2, '0');

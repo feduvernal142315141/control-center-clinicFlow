@@ -6,9 +6,20 @@ import type { MockDb } from './db';
  * solo lo muestra. Precedencia (primera regla que aplica gana):
  * suspendida → inactivo → kill switch → especialidad → core → override → plan → dependencias.
  */
-export function resolveEffectiveModules(db: MockDb, clinicId: string, now = new Date()) {
-  const clinic = db.clinics.find((c) => c.id === clinicId);
-  if (!clinic) return null;
+export function resolveEffectiveModules(
+  db: MockDb,
+  clinicId: string,
+  /** Vista previa: calcula como si la clínica tuviera otra especialidad o plan. */
+  what: { specialtyCode?: string; planCode?: string } = {},
+  now = new Date(),
+) {
+  const found = db.clinics.find((c) => c.id === clinicId);
+  if (!found) return null;
+  const clinic = {
+    ...found,
+    specialtyCode: what.specialtyCode ?? found.specialtyCode,
+    planCode: what.planCode ?? found.planCode,
+  };
 
   const plan = db.plans.find((p) => p.code === clinic.planCode);
   const overrides = (db.overrides[clinicId] ?? []).filter(

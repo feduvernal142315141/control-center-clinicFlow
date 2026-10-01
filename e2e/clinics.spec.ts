@@ -94,3 +94,39 @@ test('cambiar plan con motivo', async ({ page }) => {
   await expect(dialog).toBeHidden();
   await expect(page.getByText('Premium')).toBeVisible();
 });
+
+test('una clínica INACTIVE se reactiva con motivo', async ({ page }) => {
+  await loginAsAdmin(page, '/clinicas/c-piel-sana');
+  await expect(page.getByRole('button', { name: 'Suspender' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Reactivar' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Motivo (obligatorio)').fill('La clínica vuelve a operar este mes');
+  await dialog.getByRole('button', { name: 'Reactivar' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Suspender' })).toBeVisible();
+});
+
+test('cambiar especialidad muestra el impacto antes de confirmar', async ({ page }) => {
+  await loginAsAdmin(page, '/clinicas/c-darmas');
+  await page.getByRole('button', { name: 'Cambiar especialidad' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Nueva especialidad').selectOption('PODIATRY');
+  const off = dialog.getByRole('list', { name: /Pasan de ON a OFF/ });
+  await expect(off.getByText('DENTAL_ODONTOGRAM')).toBeVisible();
+  await expect(dialog.getByRole('list', { name: /Pasan de OFF a ON/ })).toContainText(
+    'PODIATRY_FOOT_EXAM',
+  );
+  await dialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(page.getByText('Odontología')).toBeVisible(); // no se guardó nada
+});
+
+test('editar el nombre exige motivo', async ({ page }) => {
+  await loginAsAdmin(page, '/clinicas/c-sonrisa-perfecta');
+  await page.getByRole('button', { name: 'Editar nombre' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Nombre').fill('Sonrisa Perfecta Centro');
+  await dialog.getByLabel('Motivo (obligatorio)').fill('Cambio de nombre comercial');
+  await dialog.getByRole('button', { name: 'Guardar nombre' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'Sonrisa Perfecta Centro' })).toBeVisible();
+});

@@ -13,6 +13,8 @@ import type {
  * - Centro Podológico X: PODIATRY, PRO, módulos DENTAL_* OFF por SPECIALTY_INCOMPATIBLE.
  * - Sonrisas del Norte: SUSPENDED (todo OFF por CLINIC_SUSPENDED).
  * - Odontología Integral Lara: overrides → OVERRIDE_OFF y MISSING_DEPENDENCY.
+ * - Consultorio Médico Vida: ACTIVE con suscripción en trial (el trial no es estado operativo).
+ * - Clínica Piel Sana: INACTIVE sin plan.
  * - Plan LEGACY_DENTAL con todos los módulos actuales de la app dental.
  * - AI_CLINICAL_NOTES inactivo (MODULE_INACTIVE) y GROWTH_REVIEWS con kill switch.
  */
@@ -200,11 +202,13 @@ function clinic(
   name: string,
   slug: string,
   specialtyCode: string,
-  operationalStatus: ClinicDetail['operationalStatus'],
+  /** 'TRIAL' es solo un atajo de la semilla: clínica ACTIVE con suscripción en trial. */
+  seedStatus: ClinicDetail['operationalStatus'] | 'TRIAL',
   planCode: string | null,
   createdAt: string,
 ): ClinicDetail {
-  const trial = operationalStatus === 'TRIAL';
+  const trial = seedStatus === 'TRIAL' && planCode !== null;
+  const operationalStatus = seedStatus === 'TRIAL' ? 'ACTIVE' : seedStatus;
   return {
     id,
     name,
@@ -212,6 +216,7 @@ function clinic(
     specialtyCode,
     operationalStatus,
     planCode,
+    trial,
     createdAt,
     subscription: planCode
       ? {

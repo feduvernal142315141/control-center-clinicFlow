@@ -1,7 +1,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AlertTriangle, Info, Loader2 } from 'lucide-react';
+import { AlertTriangle, Loader2 } from 'lucide-react';
 import { useEffect } from 'react';
 import { useForm, type FieldValues, type UseFormReturn } from 'react-hook-form';
 import { toast } from 'sonner';
@@ -26,11 +26,15 @@ import {
   useChangeSubscription,
   useReactivateClinic,
   useSuspendClinic,
+  useUpdateClinic,
 } from '@/lib/api/hooks/use-clinics';
-import { reasonSchema, type ClinicDetail } from '@/lib/api/schemas';
+import { clinicNameSchema, reasonSchema, type ClinicDetail } from '@/lib/api/schemas';
+import { fromDateInput, toDateInput } from '@/lib/dates';
+import { OPERATIONAL_STATUS_LABEL } from '@/lib/format';
 import { applyFieldErrors } from '@/lib/forms';
+import { ModuleImpactPreview } from './module-impact-preview';
 
-export type ClinicAction = 'suspend' | 'reactivate' | 'plan' | 'specialty';
+export type ClinicAction = 'suspend' | 'reactivate' | 'plan' | 'specialty' | 'rename';
 
 interface DialogProps {
   clinic: ClinicDetail;
@@ -226,7 +230,9 @@ export function ReactivateClinicDialog({ clinic, open, onOpenChange }: DialogPro
       pending={reactivate.isPending}
       description={
         <p>
-          <strong>{clinic.name}</strong> volverá a tener acceso según su plan y overrides.
+          <strong>{clinic.name}</strong> está{' '}
+          {OPERATIONAL_STATUS_LABEL[clinic.operationalStatus].toLowerCase()}. Volverá a estar activa
+          y con acceso según su plan y overrides.
         </p>
       }
       onSubmit={form.handleSubmit((values) =>
@@ -261,6 +267,7 @@ export function ChangeSpecialtyDialog({ clinic, open, onOpenChange }: DialogProp
   type Values = z.infer<typeof schema>;
   const form = useForm<Values>({ resolver: zodResolver(schema) });
   useResetOnOpen(form, open, { specialtyCode: '', reason: '' });
+  const selected = form.watch('specialtyCode');
 
   return (
     <ActionDialog
@@ -280,13 +287,6 @@ export function ChangeSpecialtyDialog({ clinic, open, onOpenChange }: DialogProp
         }),
       )}
     >
-      <Alert>
-        <Info />
-        <AlertDescription>
-          Los módulos de especialidad no compatibles quedarán OFF. Revisa la pestaña de módulos
-          efectivos después del cambio.
-        </AlertDescription>
-      </Alert>
       <FormField
         id="specialtyCode"
         label="Nueva especialidad"
@@ -306,6 +306,9 @@ export function ChangeSpecialtyDialog({ clinic, open, onOpenChange }: DialogProp
           </NativeSelect>
         )}
       </FormField>
+      {selected && selected !== clinic.specialtyCode && (
+        <ModuleImpactPreview clinicId={clinic.id} preview={{ specialtyCode: selected }} />
+      )}
       <ReasonField form={form} />
     </ActionDialog>
   );
@@ -314,15 +317,6 @@ export function ChangeSpecialtyDialog({ clinic, open, onOpenChange }: DialogProp
 // ---------------------------------------------------------------------------
 // Cambiar plan / suscripción
 // ---------------------------------------------------------------------------
-
-const toDateInput = (iso: string | null | undefined) => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
-/** Fecha local (inicio del día en la zona del navegador) → ISO 8601. */
-const fromDateInput = (value: string) => new Date(`${value}T00:00:00`).toISOString();
 
 const subscriptionFormSchema = z
   .object({
@@ -355,6 +349,7 @@ export function ChangePlanDialog({ clinic, open, onOpenChange }: DialogProps) {
     reason: '',
   });
   const { errors } = form.formState;
+  const selectedPlan = form.watch('planCode');
 
   return (
     <ActionDialog
@@ -398,11 +393,19 @@ export function ChangePlanDialog({ clinic, open, onOpenChange }: DialogProps) {
           </NativeSelect>
         )}
       </FormField>
+      {selectedPlan && selectedPlan !== clinic.planCode && (
+        <ModuleImpactPreview clinicId={clinic.id} preview={{ planCode: selectedPlan }} />
+      )}
       <div className="grid gap-4 sm:grid-cols-2">
         <FormField id="startsAt" label="Inicio" error={errors.startsAt?.message}>
           {(aria) => <Input {...aria} type="date" {...form.register('startsAt')} />}
         </FormField>
-        <FormField id="endsAt" label="Fin (opcional)" error={errors.endsAt?.message}>
+        <FormField
+          id="endsAt"
+          label="Fin"
+          error={errors.endsAt?.message}
+          hint="Obligatoria si es trial."
+        >
           {(aria) => <Input {...aria} type="date" {...form.register('endsAt')} />}
         </FormField>
       </div>
@@ -410,6 +413,47 @@ export function ChangePlanDialog({ clinic, open, onOpenChange }: DialogProps) {
         <input type="checkbox" className="size-4 accent-primary" {...form.register('trial')} />
         Periodo de prueba (trial)
       </label>
+      <ReasonField form={form} />
+    </ActionDialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Editar nombre
+// ---------------------------------------------------------------------------
+
+const renameSchema = z.object({ name: clinicNameSchema, reason: reasonSchema });
+
+export function RenameClinicDialog({ clinic, open, onOpenChange }: DialogProps) {
+  const update = useUpdateClinic(clinic.id);
+  const schema = renameSchema.refine((v) => v.name !== clinic.name, {
+    path: ['name'],
+    message: 'Es el nombre actual',
+  });
+  const form = useForm<z.infer<typeof renameSchema>>({ resolver: zodResolver(schema) });
+  useResetOnOpen(form, open, { name: clinic.name, reason: '' });
+
+  return (
+    <ActionDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Editar nombre"
+      submitLabel="Guardar nombre"
+      pending={update.isPending}
+      description={<p>El slug no cambia.</p>}
+      onSubmit={form.handleSubmit((values) =>
+        update.mutate(values, {
+          onSuccess: () => {
+            toast.success('Nombre actualizado');
+            onOpenChange(false);
+          },
+          onError: (e) => applyFieldErrors(e, form.setError),
+        }),
+      )}
+    >
+      <FormField id="name" label="Nombre" error={form.formState.errors.name?.message}>
+        {(aria) => <Input {...aria} {...form.register('name')} />}
+      </FormField>
       <ReasonField form={form} />
     </ActionDialog>
   );

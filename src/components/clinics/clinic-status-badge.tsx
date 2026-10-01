@@ -5,7 +5,6 @@ import { OPERATIONAL_STATUS_LABEL } from '@/lib/format';
 
 const STYLE = {
   ACTIVE: { variant: 'success', icon: CircleCheck },
-  TRIAL: { variant: 'secondary', icon: CircleDashed },
   SUSPENDED: { variant: 'destructive', icon: CirclePause },
   INACTIVE: { variant: 'outline', icon: CircleSlash },
 } as const;
@@ -17,6 +16,16 @@ export function ClinicStatusBadge({ status }: { status: OperationalStatus }) {
     <Badge variant={variant}>
       <Icon aria-hidden />
       {OPERATIONAL_STATUS_LABEL[status]}
+    </Badge>
+  );
+}
+
+/** El trial es de la suscripción, no del estado operativo: badge aparte. */
+export function TrialBadge() {
+  return (
+    <Badge variant="secondary">
+      <CircleDashed aria-hidden />
+      Trial
     </Badge>
   );
 }

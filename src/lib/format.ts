@@ -18,7 +18,6 @@ export const formatDate = (iso: string | null | undefined) =>
 
 export const OPERATIONAL_STATUS_LABEL: Record<OperationalStatus, string> = {
   ACTIVE: 'Activa',
-  TRIAL: 'Trial',
   SUSPENDED: 'Suspendida',
   INACTIVE: 'Inactiva',
 };

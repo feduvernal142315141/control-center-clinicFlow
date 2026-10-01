@@ -70,4 +70,24 @@ describe('ClinicsList', () => {
     renderWithClient(<ClinicsList />);
     expect(await screen.findByText('Ninguna clínica coincide con los filtros')).toBeInTheDocument();
   });
+
+  it('filtro de trial (suscripción) y badge Trial separado del estado', async () => {
+    nav.params = new URLSearchParams('trial=true');
+    const queries = captureListQueries();
+    const user = userEvent.setup();
+    renderWithClient(<ClinicsList />);
+    const row = (await screen.findByText('Consultorio Médico Vida')).closest('tr')!;
+    expect(within(row).getByText('Activa')).toBeInTheDocument();
+    expect(within(row).getByText('Trial')).toBeInTheDocument();
+    expect(queries.at(-1)).toContain('trial=true');
+    await user.selectOptions(screen.getByLabelText('Suscripción'), 'false');
+    expect(nav.replace).toHaveBeenLastCalledWith('/clinicas?trial=false', { scroll: false });
+  });
+
+  it('el filtro de estado no ofrece TRIAL', async () => {
+    renderWithClient(<ClinicsList />);
+    const status = screen.getByLabelText('Estado');
+    expect(within(status).queryByRole('option', { name: 'Trial' })).not.toBeInTheDocument();
+    expect(within(status).getAllByRole('option')).toHaveLength(4);
+  });
 });

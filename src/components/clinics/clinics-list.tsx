@@ -20,7 +20,7 @@ import {
   type ClinicSummary,
 } from '@/lib/api/schemas';
 import { formatDate, OPERATIONAL_STATUS_LABEL } from '@/lib/format';
-import { ClinicStatusBadge } from './clinic-status-badge';
+import { ClinicStatusBadge, TrialBadge } from './clinic-status-badge';
 
 export const PAGE_SIZE = 10;
 
@@ -38,6 +38,8 @@ function useListQuery(): [ClinicListQuery, (patch: Partial<ClinicListQuery>) => 
       status: status.success ? status.data : undefined,
       planCode: params.get('planCode') || undefined,
       specialtyCode: params.get('specialtyCode') || undefined,
+      trial:
+        params.get('trial') === 'true' ? true : params.get('trial') === 'false' ? false : undefined,
       page: Number.isInteger(page) && page > 0 ? page : 0,
       size: PAGE_SIZE,
     };
@@ -96,7 +98,12 @@ export function ClinicsList() {
         }),
         helper.accessor('operationalStatus', {
           header: 'Estado',
-          cell: (info) => <ClinicStatusBadge status={info.getValue()} />,
+          cell: (info) => (
+            <div className="flex flex-wrap gap-1">
+              <ClinicStatusBadge status={info.getValue()} />
+              {info.row.original.trial && <TrialBadge />}
+            </div>
+          ),
         }),
         helper.accessor('specialtyCode', {
           header: 'Especialidad',
@@ -114,7 +121,13 @@ export function ClinicsList() {
     [planName, specialtyName],
   );
 
-  const hasFilters = !!(query.q || query.status || query.planCode || query.specialtyCode);
+  const hasFilters = !!(
+    query.q ||
+    query.status ||
+    query.planCode ||
+    query.specialtyCode ||
+    query.trial !== undefined
+  );
   const page = clinics.data;
 
   return (
@@ -175,6 +188,19 @@ export function ClinicsList() {
             ))}
           </NativeSelect>
         </div>
+        <div className="w-44">
+          <NativeSelect
+            aria-label="Suscripción"
+            value={query.trial === undefined ? '' : String(query.trial)}
+            onChange={(e) =>
+              update({ trial: e.target.value === '' ? undefined : e.target.value === 'true' })
+            }
+          >
+            <option value="">Toda suscripción</option>
+            <option value="true">En trial</option>
+            <option value="false">Sin trial</option>
+          </NativeSelect>
+        </div>
         {hasFilters && (
           <Button
             variant="ghost"
@@ -186,6 +212,7 @@ export function ClinicsList() {
                 status: undefined,
                 planCode: undefined,
                 specialtyCode: undefined,
+                trial: undefined,
               });
             }}
           >

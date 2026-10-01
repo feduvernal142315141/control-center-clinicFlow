@@ -53,4 +53,20 @@ describe('CreateClinicForm', () => {
     expect(screen.getByText('Selecciona un plan')).toBeInTheDocument();
     expect(screen.getByText('Correo inválido')).toBeInTheDocument();
   });
+
+  it('un trial exige fecha de fin y la envía como ISO', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<CreateClinicForm />);
+    await fill(user, 'Trial Podológico');
+    await user.click(screen.getByLabelText('Empieza en periodo de prueba (trial)'));
+    await user.click(screen.getByRole('button', { name: 'Crear clínica' }));
+    expect(await screen.findByText('Un trial necesita fecha de fin')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Fin del trial'), '2026-11-30');
+    await user.click(screen.getByRole('button', { name: 'Crear clínica' }));
+    await vi.waitFor(() => expect(push).toHaveBeenCalled());
+    const created = getDb().clinics.find((c) => c.slug === 'trial-podologico')!;
+    expect(created).toMatchObject({ operationalStatus: 'ACTIVE', trial: true });
+    expect(created.subscription?.endsAt).toBe(new Date('2026-11-30T00:00:00').toISOString());
+  });
 });

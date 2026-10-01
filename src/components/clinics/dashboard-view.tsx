@@ -7,19 +7,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCatalogNames } from '@/lib/api/hooks/use-catalogs';
 import { useDashboard } from '@/lib/api/hooks/use-clinics';
-import type { OperationalStatus } from '@/lib/api/schemas';
 
 const TILES: {
   key: 'totalClinics' | 'active' | 'trial' | 'suspended' | 'inactive';
   label: string;
   icon: typeof Building2;
-  status?: OperationalStatus;
+  href: string;
 }[] = [
-  { key: 'totalClinics', label: 'Total de clínicas', icon: Building2 },
-  { key: 'active', label: 'Activas', icon: CircleCheck, status: 'ACTIVE' },
-  { key: 'trial', label: 'En trial', icon: CircleDashed, status: 'TRIAL' },
-  { key: 'suspended', label: 'Suspendidas', icon: CirclePause, status: 'SUSPENDED' },
-  { key: 'inactive', label: 'Inactivas', icon: CircleSlash, status: 'INACTIVE' },
+  { key: 'totalClinics', label: 'Total de clínicas', icon: Building2, href: '/clinicas' },
+  { key: 'active', label: 'Activas', icon: CircleCheck, href: '/clinicas?status=ACTIVE' },
+  // Trial = suscripción en trial (no es estado operativo).
+  { key: 'trial', label: 'En trial', icon: CircleDashed, href: '/clinicas?trial=true' },
+  { key: 'suspended', label: 'Suspendidas', icon: CirclePause, href: '/clinicas?status=SUSPENDED' },
+  { key: 'inactive', label: 'Inactivas', icon: CircleSlash, href: '/clinicas?status=INACTIVE' },
 ];
 
 export function DashboardView() {
@@ -34,10 +34,10 @@ export function DashboardView() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
-        {TILES.map(({ key, label, icon: Icon, status }) => (
+        {TILES.map(({ key, label, icon: Icon, href }) => (
           <Link
             key={key}
-            href={status ? `/clinicas?status=${status}` : '/clinicas'}
+            href={href}
             className="rounded-xl focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
           >
             <Card className="gap-2 py-4 transition-colors hover:bg-muted/40">

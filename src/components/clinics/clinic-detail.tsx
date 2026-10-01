@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, Pause, Play, Stethoscope, Tags } from 'lucide-react';
+import { ArrowLeft, Pause, Pencil, Play, Stethoscope, Tags } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
@@ -22,10 +22,11 @@ import {
   ChangePlanDialog,
   ChangeSpecialtyDialog,
   ReactivateClinicDialog,
+  RenameClinicDialog,
   SuspendClinicDialog,
   type ClinicAction,
 } from './clinic-action-dialogs';
-import { ClinicStatusBadge } from './clinic-status-badge';
+import { ClinicStatusBadge, TrialBadge } from './clinic-status-badge';
 import { EffectiveModulesTable } from './effective-modules-table';
 
 const TABS = ['resumen', 'modulos', 'overrides', 'auditoria'] as const;
@@ -80,26 +81,30 @@ export function ClinicDetail({ clinicId }: { clinicId: string }) {
         description={c.slug}
         actions={
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setAction('rename')}>
+              <Pencil /> Editar nombre
+            </Button>
             <Button variant="outline" onClick={() => setAction('plan')}>
               <Tags /> Cambiar plan
             </Button>
             <Button variant="outline" onClick={() => setAction('specialty')}>
               <Stethoscope /> Cambiar especialidad
             </Button>
-            {c.operationalStatus === 'SUSPENDED' ? (
-              <Button onClick={() => setAction('reactivate')}>
-                <Play /> Reactivar
-              </Button>
-            ) : c.operationalStatus !== 'INACTIVE' ? (
+            {c.operationalStatus === 'ACTIVE' ? (
               <Button variant="destructive" onClick={() => setAction('suspend')}>
                 <Pause /> Suspender
               </Button>
-            ) : null}
+            ) : (
+              <Button onClick={() => setAction('reactivate')}>
+                <Play /> Reactivar
+              </Button>
+            )}
           </div>
         }
       />
-      <div className="-mt-4 mb-6">
+      <div className="-mt-4 mb-6 flex gap-1">
         <ClinicStatusBadge status={c.operationalStatus} />
+        {c.trial && <TrialBadge />}
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -127,6 +132,7 @@ export function ClinicDetail({ clinicId }: { clinicId: string }) {
       <ChangeSpecialtyDialog {...dialogProps('specialty')} />
       <SuspendClinicDialog {...dialogProps('suspend')} />
       <ReactivateClinicDialog {...dialogProps('reactivate')} />
+      <RenameClinicDialog {...dialogProps('rename')} />
     </>
   );
 }

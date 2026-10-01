@@ -8,7 +8,9 @@ import type {
   ChangeSubscriptionInput,
   ClinicDetail,
   ClinicListQuery,
+  EffectivePreviewQuery,
   ReasonInput,
+  UpdateClinicInput,
 } from '../schemas';
 
 export function useDashboard() {
@@ -36,7 +38,17 @@ export function useClinic(clinicId: string) {
 export function useEffectiveModules(clinicId: string) {
   return useQuery({
     queryKey: queryKeys.clinics.effectiveModules(clinicId),
-    queryFn: ({ signal }) => platformApi.effectiveModules(clinicId, signal),
+    queryFn: ({ signal }) => platformApi.effectiveModules(clinicId, undefined, signal),
+  });
+}
+
+/** Vista previa del backend: módulos si la clínica tuviera otra especialidad/plan. */
+export function useEffectivePreview(clinicId: string, preview: EffectivePreviewQuery) {
+  const enabled = !!(preview.specialtyCode || preview.planCode);
+  return useQuery({
+    queryKey: queryKeys.clinics.effectivePreview(clinicId, preview),
+    queryFn: ({ signal }) => platformApi.effectiveModules(clinicId, preview, signal),
+    enabled,
   });
 }
 
@@ -58,6 +70,15 @@ export function useCreateClinic() {
   return useMutation({
     mutationFn: platformApi.createClinic,
     meta: { errorToast: false }, // el formulario muestra errores por campo
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpdateClinic(clinicId: string) {
+  const invalidate = useInvalidateClinic();
+  return useMutation({
+    mutationFn: (input: UpdateClinicInput) => platformApi.updateClinic(clinicId, input),
+    meta: { errorToast: 'No se pudo actualizar la clínica' },
     onSuccess: invalidate,
   });
 }

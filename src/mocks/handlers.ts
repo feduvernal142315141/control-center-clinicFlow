@@ -229,7 +229,8 @@ export function createPlatformHandlers(
         return HttpResponse.json<Dashboard>({
           totalClinics: db.clinics.length,
           active: status('ACTIVE'),
-          trial: status('TRIAL'),
+          // El trial se cuenta desde la suscripción, no desde el estado operativo.
+          trial: db.clinics.filter((c) => c.subscription?.trial).length,
           suspended: status('SUSPENDED'),
           inactive: status('INACTIVE'),
           byPlan: by((c) => c.planCode ?? '__NONE__').map(([planCode, count]) => ({
@@ -253,13 +254,15 @@ export function createPlatformHandlers(
         const status = url.searchParams.get('status');
         const planCode = url.searchParams.get('planCode');
         const specialtyCode = url.searchParams.get('specialtyCode');
+        const trial = url.searchParams.get('trial');
         const items = db.clinics
           .filter(
             (c) =>
               (!q || c.name.toLowerCase().includes(q) || c.slug.includes(q)) &&
               (!status || c.operationalStatus === status) &&
               (!planCode || c.planCode === planCode) &&
-              (!specialtyCode || c.specialtyCode === specialtyCode),
+              (!specialtyCode || c.specialtyCode === specialtyCode) &&
+              (trial === null || c.trial === (trial === 'true')),
           )
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .map(summary);
@@ -289,8 +292,9 @@ export function createPlatformHandlers(
           name: input.name,
           slug: input.slug,
           specialtyCode: input.specialtyCode,
-          operationalStatus: input.trial ? 'TRIAL' : 'ACTIVE',
+          operationalStatus: 'ACTIVE',
           planCode: plan.code,
+          trial: input.trial,
           createdAt: now,
           subscription: {
             id: nextId(db, 's'),
@@ -298,7 +302,7 @@ export function createPlatformHandlers(
             planCode: plan.code,
             status: input.trial ? 'TRIAL' : 'ACTIVE',
             startsAt: now,
-            endsAt: input.trial ? new Date(Date.now() + 30 * 86_400_000).toISOString() : null,
+            endsAt: input.trial ? input.trialEndsAt : null,
             renewalDate: input.trial ? null : new Date(Date.now() + 30 * 86_400_000).toISOString(),
             trial: input.trial,
           },
@@ -332,7 +336,7 @@ export function createPlatformHandlers(
         const body = await parseBody(request, updateClinicInputSchema);
         if ('response' in body) return body.response;
         const before = { name: clinic.name };
-        Object.assign(clinic, body.data);
+        clinic.name = body.data.name;
         audit(db, request, user, {
           action: 'CLINIC_UPDATED',
           clinicId: clinic.id,
@@ -340,6 +344,7 @@ export function createPlatformHandlers(
           entityId: clinic.id,
           before,
           after: { name: clinic.name },
+          reason: body.data.reason,
         });
         return HttpResponse.json(clinic);
       }),
@@ -353,13 +358,13 @@ export function createPlatformHandlers(
           if (!clinic) return notFound('Clínica');
           const body = await parseBody(request, reasonInputSchema);
           if ('response' in body) return body.response;
-          const target =
-            action === 'suspend' ? 'SUSPENDED' : clinic.subscription?.trial ? 'TRIAL' : 'ACTIVE';
-          if (action === 'suspend' && clinic.operationalStatus === 'SUSPENDED') {
-            return err(409, 'CLINIC_ALREADY_SUSPENDED', 'La clínica ya está suspendida.');
+          const target = action === 'suspend' ? 'SUSPENDED' : 'ACTIVE';
+          if (action === 'suspend' && clinic.operationalStatus !== 'ACTIVE') {
+            return err(409, 'CLINIC_NOT_ACTIVE', 'Solo se puede suspender una clínica activa.');
           }
-          if (action === 'reactivate' && clinic.operationalStatus !== 'SUSPENDED') {
-            return err(409, 'CLINIC_NOT_SUSPENDED', 'La clínica no está suspendida.');
+          // Reactivar aplica igual a SUSPENDED e INACTIVE.
+          if (action === 'reactivate' && clinic.operationalStatus === 'ACTIVE') {
+            return err(409, 'CLINIC_ALREADY_ACTIVE', 'La clínica ya está activa.');
           }
           const before = { operationalStatus: clinic.operationalStatus };
           clinic.operationalStatus = target;
@@ -387,7 +392,9 @@ export function createPlatformHandlers(
         const plan = db.plans.find((p) => p.code === body.data.planCode);
         if (!plan) return notFound('Plan');
         const before = clinic.subscription;
+        // Cambiar el trial nunca toca el estado operativo.
         clinic.planCode = plan.code;
+        clinic.trial = body.data.trial;
         clinic.subscription = {
           id: clinic.subscription?.id ?? nextId(db, 's'),
           planId: plan.id,
@@ -438,8 +445,16 @@ export function createPlatformHandlers(
 
     http.get(
       u('/clinics/:clinicId/effective-modules'),
-      authed(({ db, params }) => {
-        const rows = resolveEffectiveModules(db, params.clinicId);
+      authed(({ db, params, request }) => {
+        // ?specialtyCode / ?planCode = vista previa: cómo quedarían sin guardar nada.
+        const url = new URL(request.url);
+        const specialtyCode = url.searchParams.get('specialtyCode') ?? undefined;
+        const planCode = url.searchParams.get('planCode') ?? undefined;
+        if (specialtyCode && !db.specialties.some((s) => s.code === specialtyCode)) {
+          return notFound('Especialidad');
+        }
+        if (planCode && !db.plans.some((p) => p.code === planCode)) return notFound('Plan');
+        const rows = resolveEffectiveModules(db, params.clinicId, { specialtyCode, planCode });
         return rows ? HttpResponse.json(rows) : notFound('Clínica');
       }),
     ),

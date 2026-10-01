@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
@@ -9,6 +9,7 @@ import {
   ChangePlanDialog,
   ChangeSpecialtyDialog,
   ReactivateClinicDialog,
+  RenameClinicDialog,
   SuspendClinicDialog,
 } from './clinic-action-dialogs';
 
@@ -92,6 +93,87 @@ describe('ReactivateClinicDialog', () => {
   });
 });
 
+describe('ReactivateClinicDialog (INACTIVE)', () => {
+  it('reactiva una clínica inactiva con motivo', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    renderWithClient(
+      <ReactivateClinicDialog clinic={clinic('c-piel-sana')} open onOpenChange={onOpenChange} />,
+    );
+    expect(screen.getByText(/está inactiva/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
+    await user.click(screen.getByRole('button', { name: 'Reactivar' }));
+    await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(getDb().clinics.find((c) => c.id === 'c-piel-sana')!.operationalStatus).toBe('ACTIVE');
+  });
+});
+
+describe('vista previa de impacto', () => {
+  it('cambiar especialidad lista qué pasa de ON a OFF y de OFF a ON', async () => {
+    const user = userEvent.setup();
+    const bodies = spyBody('put', '/api/platform/clinics/c-darmas/specialty');
+    renderWithClient(
+      <ChangeSpecialtyDialog clinic={clinic('c-darmas')} open onOpenChange={() => {}} />,
+    );
+    await screen.findByRole('option', { name: 'Podología' });
+    await user.selectOptions(screen.getByLabelText('Nueva especialidad'), 'PODIATRY');
+
+    const off = await screen.findByRole('list', { name: /Pasan de ON a OFF/ });
+    expect(within(off).getByText('DENTAL_ODONTOGRAM')).toBeInTheDocument();
+    expect(
+      within(off).getAllByText('OFF: no es compatible con la especialidad de la clínica'),
+    ).toHaveLength(3);
+    const on = screen.getByRole('list', { name: /Pasan de OFF a ON/ });
+    expect(within(on).getByText('PODIATRY_FOOT_EXAM')).toBeInTheDocument();
+    expect(bodies).toHaveLength(0); // la vista previa no guarda nada
+  });
+
+  it('cambiar plan muestra los módulos que se pierden', async () => {
+    const user = userEvent.setup();
+    renderWithClient(<ChangePlanDialog clinic={clinic('c-darmas')} open onOpenChange={() => {}} />);
+    await screen.findByRole('option', { name: 'Básico' });
+    await user.selectOptions(screen.getByLabelText('Plan'), 'BASIC');
+    const off = await screen.findByRole('list', { name: /Pasan de ON a OFF/ });
+    expect(within(off).getByText('AI_RECEPTIONIST')).toBeInTheDocument();
+    expect(within(off).getAllByText('OFF: no está incluido en el plan').length).toBeGreaterThan(0);
+  });
+
+  it('si nada cambia, lo dice', async () => {
+    const user = userEvent.setup();
+    renderWithClient(
+      <ChangeSpecialtyDialog clinic={clinic('c-sonrisas-norte')} open onOpenChange={() => {}} />,
+    );
+    await screen.findByRole('option', { name: 'Podología' });
+    await user.selectOptions(screen.getByLabelText('Nueva especialidad'), 'PODIATRY');
+    expect(await screen.findByText('Ningún módulo cambia de estado.')).toBeInTheDocument();
+  });
+});
+
+describe('RenameClinicDialog', () => {
+  it('exige motivo y envía { name, reason }', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    const bodies: unknown[] = [];
+    server.events.on('request:start', async ({ request }) => {
+      if (request.method === 'PATCH') bodies.push(await request.clone().json());
+    });
+    renderWithClient(
+      <RenameClinicDialog clinic={clinic('c-darmas')} open onOpenChange={onOpenChange} />,
+    );
+    const name = screen.getByLabelText('Nombre');
+    await user.clear(name);
+    await user.type(name, "D'Armas Odontología");
+    await user.click(screen.getByRole('button', { name: 'Guardar nombre' }));
+    expect(
+      await screen.findByText('El motivo debe tener al menos 10 caracteres'),
+    ).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
+    await user.click(screen.getByRole('button', { name: 'Guardar nombre' }));
+    await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(bodies).toEqual([{ name: "D'Armas Odontología", reason: REASON }]);
+  });
+});
+
 describe('ChangeSpecialtyDialog', () => {
   it('envía especialidad + motivo y no ofrece la actual', async () => {
     const user = userEvent.setup();
@@ -129,7 +211,7 @@ describe('ChangePlanDialog', () => {
 
     await user.selectOptions(screen.getByLabelText('Plan'), 'PRO');
     await user.click(screen.getByLabelText('Periodo de prueba (trial)')); // desmarca trial
-    await user.clear(screen.getByLabelText('Fin (opcional)'));
+    await user.clear(screen.getByLabelText('Fin'));
     await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
     await user.click(screen.getByRole('button', { name: 'Guardar suscripción' }));
 
@@ -145,7 +227,7 @@ describe('ChangePlanDialog', () => {
     const bodies = spyBody('put', '/api/platform/clinics/c-vida/subscription');
     renderWithClient(<ChangePlanDialog clinic={clinic('c-vida')} open onOpenChange={() => {}} />);
     await screen.findByRole('option', { name: 'Pro' });
-    await user.clear(screen.getByLabelText('Fin (opcional)'));
+    await user.clear(screen.getByLabelText('Fin'));
     await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
     await user.click(screen.getByRole('button', { name: 'Guardar suscripción' }));
     expect(await screen.findByText('Un trial necesita fecha de fin')).toBeInTheDocument();

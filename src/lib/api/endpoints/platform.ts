@@ -12,7 +12,9 @@ import {
   type ChangeSubscriptionInput,
   type ClinicListQuery,
   type CreateClinicInput,
+  type EffectivePreviewQuery,
   type ReasonInput,
+  type UpdateClinicInput,
 } from '../schemas';
 
 const clinicPath = (clinicId: string) => `/clinics/${encodeURIComponent(clinicId)}`;
@@ -33,6 +35,12 @@ export const platformApi = {
     platformRequest(clinicPath(clinicId), { schema: clinicDetailSchema, signal }),
   createClinic: (input: CreateClinicInput) =>
     platformRequest('/clinics', { method: 'POST', body: input, schema: clinicDetailSchema }),
+  updateClinic: (clinicId: string, input: UpdateClinicInput) =>
+    platformRequest(clinicPath(clinicId), {
+      method: 'PATCH',
+      body: input,
+      schema: clinicDetailSchema,
+    }),
   suspendClinic: (clinicId: string, input: ReasonInput) =>
     platformRequest(`${clinicPath(clinicId)}/suspend`, {
       method: 'POST',
@@ -57,8 +65,10 @@ export const platformApi = {
       body: input,
       schema: clinicDetailSchema,
     }),
-  effectiveModules: (clinicId: string, signal?: AbortSignal) =>
+  /** Con `preview`, el backend devuelve cómo quedarían los módulos sin guardar nada. */
+  effectiveModules: (clinicId: string, preview?: EffectivePreviewQuery, signal?: AbortSignal) =>
     platformRequest(`${clinicPath(clinicId)}/effective-modules`, {
+      query: preview,
       schema: z.array(effectiveModuleSchema),
       signal,
     }),

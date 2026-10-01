@@ -17,9 +17,20 @@ import { NativeSelect } from '@/components/ui/native-select';
 import { usePlans, useSpecialties } from '@/lib/api/hooks/use-catalogs';
 import { useCreateClinic } from '@/lib/api/hooks/use-clinics';
 import { errorMessage, fieldErrorsOf } from '@/lib/api/errors';
-import { createClinicInputSchema, type CreateClinicInput } from '@/lib/api/schemas';
+import { z } from 'zod';
+import { createClinicInputSchema } from '@/lib/api/schemas';
+import { fromDateInput } from '@/lib/dates';
 import { slugify } from '@/lib/format';
 import { applyFieldErrors } from '@/lib/forms';
+
+/** Igual que el contrato, pero la fecha llega como `YYYY-MM-DD` del input. */
+const formSchema = createClinicInputSchema
+  .safeExtend({ trialEndsAt: z.string() })
+  .refine((v) => !v.trial || v.trialEndsAt !== '', {
+    path: ['trialEndsAt'],
+    message: 'Un trial necesita fecha de fin',
+  });
+type FormValues = z.infer<typeof formSchema>;
 
 export function CreateClinicForm() {
   const router = useRouter();
@@ -28,27 +39,35 @@ export function CreateClinicForm() {
   const create = useCreateClinic();
   const slugTouched = useRef(false);
 
-  const form = useForm<CreateClinicInput>({
-    resolver: zodResolver(createClinicInputSchema),
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
     defaultValues: {
       name: '',
       slug: '',
       specialtyCode: '',
       planCode: '',
       trial: false,
+      trialEndsAt: '',
       admin: { fullName: '', email: '' },
     },
   });
   const { errors } = form.formState;
+  const trial = form.watch('trial');
 
-  const onSubmit = form.handleSubmit((values) =>
-    create.mutate(values, {
-      onSuccess: (clinic) => {
-        toast.success(`Clínica "${clinic.name}" creada`);
-        router.push(`/clinicas/${clinic.id}`);
+  const onSubmit = form.handleSubmit(({ trialEndsAt, ...values }) =>
+    create.mutate(
+      {
+        ...values,
+        trialEndsAt: values.trial && trialEndsAt ? fromDateInput(trialEndsAt) : null,
       },
-      onError: (error) => applyFieldErrors(error, form.setError),
-    }),
+      {
+        onSuccess: (clinic) => {
+          toast.success(`Clínica "${clinic.name}" creada`);
+          router.push(`/clinicas/${clinic.id}`);
+        },
+        onError: (error) => applyFieldErrors(error, form.setError),
+      },
+    ),
   );
 
   if (plans.isError || specialties.isError) {
@@ -151,6 +170,11 @@ export function CreateClinicForm() {
             <input type="checkbox" className="size-4 accent-primary" {...form.register('trial')} />
             Empieza en periodo de prueba (trial)
           </label>
+          {trial && (
+            <FormField id="trialEndsAt" label="Fin del trial" error={errors.trialEndsAt?.message}>
+              {(aria) => <Input {...aria} type="date" {...form.register('trialEndsAt')} />}
+            </FormField>
+          )}
         </CardContent>
       </Card>
 

@@ -13,6 +13,12 @@ describe('DashboardView', () => {
     expect(await screen.findByTestId('kpi-totalClinics')).toHaveTextContent(String(total));
     const suspended = getDb().clinics.filter((c) => c.operationalStatus === 'SUSPENDED').length;
     expect(screen.getByTestId('kpi-suspended')).toHaveTextContent(String(suspended));
+    const trial = getDb().clinics.filter((c) => c.subscription?.trial).length;
+    expect(screen.getByTestId('kpi-trial')).toHaveTextContent(String(trial));
+    expect(screen.getByTestId('kpi-trial').closest('a')).toHaveAttribute(
+      'href',
+      '/clinicas?trial=true',
+    );
 
     const byPlan = await screen.findByRole('list', { name: 'Clínicas por plan' });
     expect(await within(byPlan).findByText('Legacy dental')).toBeInTheDocument();

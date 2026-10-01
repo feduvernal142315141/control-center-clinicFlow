@@ -2,6 +2,7 @@ import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithClient, setupMockApi } from '@test/render';
+import { getDb } from '@/mocks/db';
 import { ClinicsList } from './clinics-list';
 
 const nav = vi.hoisted(() => ({ params: new URLSearchParams(), replace: vi.fn() }));
@@ -32,8 +33,9 @@ describe('ClinicsList', () => {
     renderWithClient(<ClinicsList />);
     const table = await screen.findByRole('table', { name: 'Clínicas' });
     expect(within(table).getAllByRole('row')).toHaveLength(11); // encabezado + 10
-    expect(screen.getByText('Página 1 de 3')).toBeInTheDocument();
-    expect(screen.getByText('24 clínicas')).toBeInTheDocument();
+    const total = getDb().clinics.length;
+    expect(screen.getByText(`Página 1 de ${Math.ceil(total / 10)}`)).toBeInTheDocument();
+    expect(screen.getByText(`${total} clínicas`)).toBeInTheDocument();
   });
 
   it('lee filtros de la URL y los manda al backend', async () => {

@@ -115,13 +115,54 @@ export interface PlatformHandlersOptions {
 
 let handlerOptions: PlatformHandlersOptions = {};
 
+/**
+ * D8: un trial vencido pasa a PAST_DUE y la clínica sigue ACTIVE. Nada se suspende solo.
+ * En el backend real es un job; aquí se aplica al vuelo en cada request.
+ */
+export function expireTrials(db: MockDb, now = Date.now()) {
+  for (const c of db.clinics) {
+    const s = c.subscription;
+    if (s?.trial && s.status === 'TRIAL' && s.endsAt && new Date(s.endsAt).getTime() < now) {
+      s.status = 'PAST_DUE';
+    }
+  }
+}
+
 /** Envuelve un resolver que exige sesión de plataforma. */
 function authed(resolver: (ctx: Ctx) => Response | Promise<Response>) {
   return ({ request, params }: { request: Request; params: Record<string, unknown> }) => {
     const db = getDb();
+    expireTrials(db);
     const user = handlerOptions.skipAuth ? db.users[0] : currentUser(db, request);
     if (!user) return err(401, 'UNAUTHENTICATED', 'Token inválido o expirado.');
     return resolver({ db, user, request, params: params as Record<string, string> });
+  };
+}
+
+const SEVEN_DAYS_MS = 7 * 86_400_000;
+
+function trialLists(db: MockDb, now = Date.now()) {
+  const item = (c: ClinicDetail) => ({
+    clinicId: c.id,
+    name: c.name,
+    slug: c.slug,
+    planCode: c.subscription!.planCode,
+    endsAt: c.subscription!.endsAt!,
+  });
+  const trials = db.clinics.filter((c) => c.subscription?.trial && c.subscription.endsAt);
+  const byEnd = (a: { endsAt: string }, b: { endsAt: string }) => a.endsAt.localeCompare(b.endsAt);
+  return {
+    expired: trials
+      .filter((c) => c.subscription!.status === 'PAST_DUE')
+      .map(item)
+      .sort(byEnd),
+    expiringSoon: trials
+      .filter((c) => {
+        const ends = new Date(c.subscription!.endsAt!).getTime();
+        return c.subscription!.status === 'TRIAL' && ends >= now && ends <= now + SEVEN_DAYS_MS;
+      })
+      .map(item)
+      .sort(byEnd),
   };
 }
 
@@ -230,7 +271,7 @@ export function createPlatformHandlers(
           totalClinics: db.clinics.length,
           active: status('ACTIVE'),
           // El trial se cuenta desde la suscripción, no desde el estado operativo.
-          trial: db.clinics.filter((c) => c.subscription?.trial).length,
+          trial: db.clinics.filter((c) => c.subscription?.status === 'TRIAL').length,
           suspended: status('SUSPENDED'),
           inactive: status('INACTIVE'),
           byPlan: by((c) => c.planCode ?? '__NONE__').map(([planCode, count]) => ({
@@ -241,6 +282,7 @@ export function createPlatformHandlers(
             specialtyCode,
             count,
           })),
+          trials: trialLists(db),
         });
       }),
     ),

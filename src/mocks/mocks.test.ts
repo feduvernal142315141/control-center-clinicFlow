@@ -257,7 +257,9 @@ describe('decisiones BO2: trial e INACTIVE', () => {
   it('el KPI de trial se cuenta desde la suscripción', async () => {
     const token = await login();
     const kpis = await (await call('/dashboard', { token })).json();
-    expect(kpis.trial).toBe(getDb().clinics.filter((c) => c.subscription?.trial).length);
+    expect(kpis.trial).toBe(
+      getDb().clinics.filter((c) => c.subscription?.status === 'TRIAL').length,
+    );
     expect(kpis.active + kpis.suspended + kpis.inactive).toBe(kpis.totalClinics);
   });
 
@@ -310,6 +312,22 @@ describe('decisiones BO2: trial e INACTIVE', () => {
       body: reason,
     });
     expect((await res.json()).operationalStatus).toBe('ACTIVE');
+  });
+});
+
+describe('D8: trial vencido', () => {
+  it('pasa a PAST_DUE, la clínica sigue ACTIVE y aparece en trials.expired', async () => {
+    const token = await login();
+    const kpis = await (await call('/dashboard', { token })).json();
+    const vencido = getDb().clinics.find((c) => c.id === 'c-trial-vencido')!;
+    expect(vencido.operationalStatus).toBe('ACTIVE');
+    expect(vencido.subscription).toMatchObject({ status: 'PAST_DUE', trial: true });
+    expect(kpis.trials.expired.map((t: { clinicId: string }) => t.clinicId)).toEqual([
+      'c-trial-vencido',
+    ]);
+    expect(kpis.trials.expiringSoon.map((t: { clinicId: string }) => t.clinicId)).toEqual([
+      'c-trial-por-vencer',
+    ]);
   });
 });
 

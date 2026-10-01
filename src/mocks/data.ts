@@ -15,6 +15,7 @@ import type {
  * - Odontología Integral Lara: overrides → OVERRIDE_OFF y MISSING_DEPENDENCY.
  * - Consultorio Médico Vida: ACTIVE con suscripción en trial (el trial no es estado operativo).
  * - Clínica Piel Sana: INACTIVE sin plan.
+ * - Trial por vencer (3 días) y trial vencido (D8: suscripción PAST_DUE, clínica ACTIVE).
  * - Plan LEGACY_DENTAL con todos los módulos actuales de la app dental.
  * - AI_CLINICAL_NOTES inactivo (MODULE_INACTIVE) y GROWTH_REVIEWS con kill switch.
  */
@@ -195,6 +196,8 @@ export const seedPlans: Plan[] = [
   },
 ];
 
+const daysFromNow = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
+
 const planId = (code: string) => seedPlans.find((p) => p.code === code)!.id;
 
 function clinic(
@@ -206,6 +209,7 @@ function clinic(
   seedStatus: ClinicDetail['operationalStatus'] | 'TRIAL',
   planCode: string | null,
   createdAt: string,
+  trialEndsAt = '2026-10-31T23:59:59-04:00',
 ): ClinicDetail {
   const trial = seedStatus === 'TRIAL' && planCode !== null;
   const operationalStatus = seedStatus === 'TRIAL' ? 'ACTIVE' : seedStatus;
@@ -225,7 +229,7 @@ function clinic(
           planCode,
           status: trial ? 'TRIAL' : operationalStatus === 'SUSPENDED' ? 'PAST_DUE' : 'ACTIVE',
           startsAt: createdAt,
-          endsAt: trial ? '2026-10-31T23:59:59-04:00' : null,
+          endsAt: trial ? trialEndsAt : null,
           renewalDate: trial ? null : '2026-11-01T00:00:00-04:00',
           trial,
         }
@@ -316,6 +320,27 @@ export const seedClinics: ClinicDetail[] = [
     'TRIAL',
     'BASIC',
     '2026-09-20T12:00:00-04:00',
+  ),
+  // D8: trials relativos a "hoy" para que el bloque Trials del dashboard tenga datos.
+  clinic(
+    'c-trial-por-vencer',
+    'Clínica Dental Trial Próximo',
+    'clinica-dental-trial-proximo',
+    'DENTAL',
+    'TRIAL',
+    'BASIC',
+    daysFromNow(-25),
+    daysFromNow(3),
+  ),
+  clinic(
+    'c-trial-vencido',
+    'Podología Trial Vencido',
+    'podologia-trial-vencido',
+    'PODIATRY',
+    'TRIAL',
+    'PRO',
+    daysFromNow(-35),
+    daysFromNow(-5),
   ),
   clinic(
     'c-piel-sana',

@@ -8,8 +8,9 @@ import type {
   ChangeSubscriptionInput,
   ClinicDetail,
   ClinicListQuery,
+  ClinicOverridesUpdateInput,
+  ClinicStatusInput,
   EffectivePreviewQuery,
-  ReasonInput,
   UpdateClinicInput,
 } from '../schemas';
 
@@ -28,10 +29,11 @@ export function useClinics(query: ClinicListQuery) {
   });
 }
 
-export function useClinic(clinicId: string) {
+export function useClinic(clinicId: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.clinics.detail(clinicId),
     queryFn: ({ signal }) => platformApi.getClinic(clinicId, signal),
+    enabled: enabled && !!clinicId,
   });
 }
 
@@ -86,7 +88,7 @@ export function useUpdateClinic(clinicId: string) {
 export function useSuspendClinic(clinicId: string) {
   const invalidate = useInvalidateClinic();
   return useMutation({
-    mutationFn: (input: ReasonInput) => platformApi.suspendClinic(clinicId, input),
+    mutationFn: (input: ClinicStatusInput) => platformApi.suspendClinic(clinicId, input),
     meta: { errorToast: 'No se pudo suspender la clínica' },
     onSuccess: invalidate,
   });
@@ -95,7 +97,7 @@ export function useSuspendClinic(clinicId: string) {
 export function useReactivateClinic(clinicId: string) {
   const invalidate = useInvalidateClinic();
   return useMutation({
-    mutationFn: (input: ReasonInput) => platformApi.reactivateClinic(clinicId, input),
+    mutationFn: (input: ClinicStatusInput) => platformApi.reactivateClinic(clinicId, input),
     meta: { errorToast: 'No se pudo reactivar la clínica' },
     onSuccess: invalidate,
   });
@@ -116,5 +118,34 @@ export function useChangeSpecialty(clinicId: string) {
     mutationFn: (input: ChangeSpecialtyInput) => platformApi.changeSpecialty(clinicId, input),
     meta: { errorToast: 'No se pudo cambiar la especialidad' },
     onSuccess: invalidate,
+  });
+}
+
+export function useModuleOverrides(clinicId: string) {
+  return useQuery({
+    queryKey: queryKeys.clinics.overrides(clinicId),
+    queryFn: ({ signal }) => platformApi.moduleOverrides(clinicId, signal),
+  });
+}
+
+/**
+ * Guarda la lista completa de overrides (D18). Después refresca la clínica (versión),
+ * sus módulos efectivos y la auditoría.
+ */
+export function useUpdateModuleOverrides(clinicId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ClinicOverridesUpdateInput) =>
+      platformApi.updateModuleOverrides(clinicId, input),
+    meta: { errorToast: false }, // el diálogo muestra el error
+    onSuccess: (saved) => {
+      qc.setQueryData(queryKeys.clinics.overrides(clinicId), saved);
+      return Promise.all([
+        qc.invalidateQueries({ queryKey: queryKeys.clinics.detail(clinicId) }),
+        qc.invalidateQueries({ queryKey: queryKeys.clinics.all }),
+        qc.invalidateQueries({ queryKey: queryKeys.dashboard }),
+        qc.invalidateQueries({ queryKey: queryKeys.auditLogs }),
+      ]);
+    },
   });
 }

@@ -6,13 +6,12 @@ import {
   createClinicInputSchema,
   moduleCreateInputSchema,
   moduleUpdateInputSchema,
-  moduleOverrideInputSchema,
   planCreateInputSchema,
   planUpdateInputSchema,
   planModulesInputSchema,
-  reasonInputSchema,
+  clinicStatusInputSchema,
+  clinicOverridesUpdateInputSchema,
   updateClinicInputSchema,
-  type AuditLog,
   type ClinicDetail,
   type Dashboard,
   type ModuleOverride,
@@ -21,7 +20,7 @@ import {
   type PlatformMe,
 } from '@/lib/api/schemas';
 import { MOCK_TOTP_CODE, type MockUser } from './data';
-import { getDb, nextId, type MockDb } from './db';
+import { getDb, nextId, type MockDb, type StoredAuditLog } from './db';
 import { findDependencyCycle, resolveEffectiveModules } from './effective';
 
 const ACCESS_TTL_SECONDS = Number(process.env.MOCK_ACCESS_TTL_SECONDS ?? 15 * 60);
@@ -81,7 +80,10 @@ function audit(
   db: MockDb,
   request: Request,
   user: MockUser,
-  entry: Pick<AuditLog, 'action' | 'clinicId' | 'entityType' | 'entityId' | 'before' | 'after'> & {
+  entry: Pick<
+    StoredAuditLog,
+    'action' | 'clinicId' | 'entityType' | 'entityId' | 'before' | 'after'
+  > & {
     reason?: string | null;
   },
 ) {
@@ -386,6 +388,7 @@ export function createPlatformHandlers(
           planCode: plan.code,
           trial: input.trial,
           createdAt: now,
+          version: 1,
           subscription: {
             id: nextId(db, 's'),
             planId: plan.id,
@@ -425,10 +428,13 @@ export function createPlatformHandlers(
         if (!clinic) return notFound('Clínica');
         const body = await parseBody(request, updateClinicInputSchema);
         if ('response' in body) return body.response;
+        if (body.data.version !== clinic.version)
+          return versionConflict('La clínica', clinic.version);
         const before = { name: clinic.name };
         clinic.name = body.data.name;
+        clinic.version += 1;
         audit(db, request, user, {
-          action: 'CLINIC_UPDATED',
+          action: 'CLINIC_RENAMED',
           clinicId: clinic.id,
           entityType: 'Clinic',
           entityId: clinic.id,
@@ -446,8 +452,11 @@ export function createPlatformHandlers(
         authed(async ({ db, user, request, params }) => {
           const clinic = findClinic(db, params.clinicId);
           if (!clinic) return notFound('Clínica');
-          const body = await parseBody(request, reasonInputSchema);
+          const body = await parseBody(request, clinicStatusInputSchema);
           if ('response' in body) return body.response;
+          if (body.data.version !== clinic.version) {
+            return versionConflict('La clínica', clinic.version);
+          }
           const target = action === 'suspend' ? 'SUSPENDED' : 'ACTIVE';
           if (action === 'suspend' && clinic.operationalStatus !== 'ACTIVE') {
             return err(409, 'CLINIC_NOT_ACTIVE', 'Solo se puede suspender una clínica activa.');
@@ -458,6 +467,7 @@ export function createPlatformHandlers(
           }
           const before = { operationalStatus: clinic.operationalStatus };
           clinic.operationalStatus = target;
+          clinic.version += 1;
           audit(db, request, user, {
             action: action === 'suspend' ? 'CLINIC_SUSPENDED' : 'CLINIC_REACTIVATED',
             clinicId: clinic.id,
@@ -479,6 +489,8 @@ export function createPlatformHandlers(
         if (!clinic) return notFound('Clínica');
         const body = await parseBody(request, changeSubscriptionInputSchema);
         if ('response' in body) return body.response;
+        if (body.data.version !== clinic.version)
+          return versionConflict('La clínica', clinic.version);
         const plan = db.plans.find((p) => p.code === body.data.planCode);
         if (!plan) return notFound('Plan');
         const before = clinic.subscription;
@@ -495,8 +507,9 @@ export function createPlatformHandlers(
           renewalDate: body.data.trial ? null : body.data.endsAt,
           trial: body.data.trial,
         };
+        clinic.version += 1;
         audit(db, request, user, {
-          action: 'SUBSCRIPTION_CHANGED',
+          action: 'PLAN_CHANGED',
           clinicId: clinic.id,
           entityType: 'Subscription',
           entityId: clinic.subscription.id,
@@ -515,11 +528,14 @@ export function createPlatformHandlers(
         if (!clinic) return notFound('Clínica');
         const body = await parseBody(request, changeSpecialtyInputSchema);
         if ('response' in body) return body.response;
+        if (body.data.version !== clinic.version)
+          return versionConflict('La clínica', clinic.version);
         if (!db.specialties.some((s) => s.code === body.data.specialtyCode && s.active)) {
           return notFound('Especialidad');
         }
         const before = { specialtyCode: clinic.specialtyCode };
         clinic.specialtyCode = body.data.specialtyCode;
+        clinic.version += 1;
         audit(db, request, user, {
           action: 'SPECIALTY_CHANGED',
           clinicId: clinic.id,
@@ -551,20 +567,33 @@ export function createPlatformHandlers(
 
     http.get(
       u('/clinics/:clinicId/module-overrides'),
-      authed(({ db, params }) =>
-        findClinic(db, params.clinicId)
-          ? HttpResponse.json(db.overrides[params.clinicId] ?? [])
-          : notFound('Clínica'),
-      ),
+      authed(({ db, params }) => {
+        const clinic = findClinic(db, params.clinicId);
+        if (!clinic) return notFound('Clínica');
+        return HttpResponse.json({
+          overrides: db.overrides[clinic.id] ?? [],
+          version: clinic.version,
+        });
+      }),
     ),
 
+    // D18: lista completa + reason + version (no hay DELETE: quitar = no enviarlo).
     http.put(
       u('/clinics/:clinicId/module-overrides'),
       authed(async ({ db, user, request, params }) => {
-        if (!findClinic(db, params.clinicId)) return notFound('Clínica');
-        const body = await parseBody(request, moduleOverrideInputSchema.array());
+        const clinic = findClinic(db, params.clinicId);
+        if (!clinic) return notFound('Clínica');
+        const body = await parseBody(request, clinicOverridesUpdateInputSchema);
         if ('response' in body) return body.response;
-        for (const o of body.data) {
+        if (body.data.version !== clinic.version)
+          return versionConflict('La clínica', clinic.version);
+        const codes = body.data.overrides.map((o) => o.moduleCode);
+        if (new Set(codes).size !== codes.length) {
+          return err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
+            fields: [{ field: 'overrides', message: 'Un módulo solo puede tener un override' }],
+          });
+        }
+        for (const o of body.data.overrides) {
           const m = db.modules.find((x) => x.code === o.moduleCode);
           if (!m) return notFound(`Módulo ${o.moduleCode}`);
           if (m.requiredCore && !o.enabled) {
@@ -575,28 +604,63 @@ export function createPlatformHandlers(
             );
           }
         }
-        const before = db.overrides[params.clinicId] ?? [];
+        const before = db.overrides[clinic.id] ?? [];
         const now = new Date().toISOString();
-        const next: ModuleOverride[] = body.data.map((o) => {
+        const same = (
+          a: ModuleOverride,
+          o: { enabled: boolean; reason: string; expiresAt: string | null },
+        ) => a.enabled === o.enabled && a.reason === o.reason && a.expiresAt === o.expiresAt;
+        const next: ModuleOverride[] = body.data.overrides.map((o) => {
           const prev = before.find((p) => p.moduleCode === o.moduleCode);
-          const unchanged =
-            prev &&
-            prev.enabled === o.enabled &&
-            prev.reason === o.reason &&
-            prev.expiresAt === o.expiresAt;
-          return unchanged ? prev : { ...o, createdBy: user.email, createdAt: now };
+          if (prev && same(prev, o)) return prev;
+          // Un vencimiento nuevo debe ser futuro.
+          return { ...o, createdBy: user.email, createdAt: now };
         });
-        db.overrides[params.clinicId] = next;
-        audit(db, request, user, {
-          action: 'MODULE_OVERRIDES_UPDATED',
-          clinicId: params.clinicId,
-          entityType: 'ModuleOverride',
-          entityId: params.clinicId,
-          before,
-          after: next,
-          reason: body.data.map((o) => o.reason).join(' | ') || null,
-        });
-        return HttpResponse.json(next);
+        const pastExpiry = next.find(
+          (o) =>
+            o.createdAt === now &&
+            o.expiresAt !== null &&
+            new Date(o.expiresAt).getTime() <= Date.now(),
+        );
+        if (pastExpiry) {
+          return err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
+            fields: [
+              {
+                field: `overrides.${next.indexOf(pastExpiry)}.expiresAt`,
+                message: 'El vencimiento debe ser una fecha futura',
+              },
+            ],
+          });
+        }
+        db.overrides[clinic.id] = next;
+        clinic.version += 1;
+        // Un evento por módulo cambiado: SET (nuevo o modificado) o REMOVED.
+        for (const o of next) {
+          const prev = before.find((p) => p.moduleCode === o.moduleCode);
+          if (prev === o) continue;
+          audit(db, request, user, {
+            action: 'MODULE_OVERRIDE_SET',
+            clinicId: clinic.id,
+            entityType: 'ModuleOverride',
+            entityId: `${clinic.id}:${o.moduleCode}`,
+            before: prev ?? null,
+            after: o,
+            reason: body.data.reason,
+          });
+        }
+        for (const prev of before) {
+          if (next.some((o) => o.moduleCode === prev.moduleCode)) continue;
+          audit(db, request, user, {
+            action: 'MODULE_OVERRIDE_REMOVED',
+            clinicId: clinic.id,
+            entityType: 'ModuleOverride',
+            entityId: `${clinic.id}:${prev.moduleCode}`,
+            before: prev,
+            after: null,
+            reason: body.data.reason,
+          });
+        }
+        return HttpResponse.json({ overrides: next, version: clinic.version });
       }),
     ),
 
@@ -833,7 +897,7 @@ export function createPlatformHandlers(
           }
         }
         audit(db, request, user, {
-          action: 'MODULE_UPDATED',
+          action: before.active && !existing.active ? 'MODULE_DEACTIVATED' : 'MODULE_UPDATED',
           clinicId: null,
           entityType: 'Module',
           entityId: existing.id,
@@ -897,8 +961,27 @@ export function createPlatformHandlers(
             (!from || new Date(a.createdAt) >= from) &&
             (!to || new Date(a.createdAt) <= to),
         );
-        return HttpResponse.json(paginate(items, url));
+        // Más recientes primero.
+        items.sort((x, y) => new Date(y.createdAt).getTime() - new Date(x.createdAt).getTime());
+        const page = paginate(items, url);
+        return HttpResponse.json({
+          ...page,
+          content: page.content.map((a) => ({
+            ...a,
+            clinicName: a.clinicId ? (findClinic(db, a.clinicId)?.name ?? null) : null,
+          })),
+        });
       }),
+    ),
+
+    // Usuarios KodeWave, para el filtro de actor de la auditoría.
+    http.get(
+      u('/users'),
+      authed(({ db }) =>
+        HttpResponse.json(
+          db.users.map((x) => ({ id: x.id, email: x.email, fullName: x.fullName })),
+        ),
+      ),
     ),
   ];
 }

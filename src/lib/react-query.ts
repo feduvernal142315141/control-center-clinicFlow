@@ -1,7 +1,7 @@
 import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { authApi } from './api/endpoints/auth';
-import { isApiError } from './api/errors';
+import { isApiError, isVersionConflict } from './api/errors';
 
 declare module '@tanstack/react-query' {
   interface Register {
@@ -57,7 +57,8 @@ export function createQueryClient() {
           return;
         }
         const title = mutation.meta?.errorToast;
-        if (title === false) return;
+        // VERSION_CONFLICT lo maneja cada formulario con su aviso (D16).
+        if (title === false || isVersionConflict(error)) return;
         toast.error(title ?? 'La operación falló', {
           description: isApiError(error) ? `${error.message} (${error.code})` : String(error),
         });

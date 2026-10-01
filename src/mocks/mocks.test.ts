@@ -53,7 +53,7 @@ describe('datos semilla cumplen los contratos zod', () => {
     db.specialties.forEach((s) =>
       specialtySchema.parse({ ...s, clinicCount: 0, compatibleModuleCount: 0 }),
     );
-    db.auditLogs.forEach((a) => auditLogSchema.parse(a));
+    db.auditLogs.forEach((a) => auditLogSchema.parse({ ...a, clinicName: null }));
   });
 
   it('módulos efectivos de todas las clínicas', () => {
@@ -125,13 +125,13 @@ describe('handlers', () => {
     const bad = await call('/clinics/c-darmas/suspend', {
       method: 'POST',
       token,
-      body: JSON.stringify({ reason: '' }),
+      body: JSON.stringify({ reason: '', version: 1 }),
     });
     expect(bad.status).toBe(400);
     const ok = await call('/clinics/c-darmas/suspend', {
       method: 'POST',
       token,
-      body: JSON.stringify({ reason: 'Falta de pago de tres meses' }),
+      body: JSON.stringify({ reason: 'Falta de pago de tres meses', version: 1 }),
     });
     expect((await ok.json()).operationalStatus).toBe('SUSPENDED');
     expect(getDb().auditLogs[0]).toMatchObject({
@@ -161,14 +161,18 @@ describe('handlers', () => {
     const res = await call('/clinics/c-darmas/module-overrides', {
       method: 'PUT',
       token,
-      body: JSON.stringify([
-        {
-          moduleCode: 'CORE_PATIENTS',
-          enabled: false,
-          reason: 'Intento de apagar core',
-          expiresAt: null,
-        },
-      ]),
+      body: JSON.stringify({
+        overrides: [
+          {
+            moduleCode: 'CORE_PATIENTS',
+            enabled: false,
+            reason: 'Intento de apagar core',
+            expiresAt: null,
+          },
+        ],
+        reason: 'Intento de apagar core',
+        version: 1,
+      }),
     });
     expect((await res.json()).code).toBe('REQUIRED_CORE_IMMUTABLE');
   });
@@ -238,11 +242,15 @@ describe('handlers', () => {
     const ok = await call('/clinics/c-darmas', {
       method: 'PATCH',
       token,
-      body: JSON.stringify({ name: "D'Armas Odontología", reason: 'Cambio de razón social' }),
+      body: JSON.stringify({
+        name: "D'Armas Odontología",
+        reason: 'Cambio de razón social',
+        version: 1,
+      }),
     });
     expect((await ok.json()).name).toBe("D'Armas Odontología");
     expect(getDb().auditLogs[0]).toMatchObject({
-      action: 'CLINIC_UPDATED',
+      action: 'CLINIC_RENAMED',
       reason: 'Cambio de razón social',
     });
   });
@@ -280,6 +288,7 @@ describe('decisiones BO2: trial e INACTIVE', () => {
         endsAt: null,
         trial: false,
         reason: 'Pasa a plan pago',
+        version: 1,
       }),
     });
     expect(await res.json()).toMatchObject({ operationalStatus: 'ACTIVE', trial: false });
@@ -296,6 +305,7 @@ describe('decisiones BO2: trial e INACTIVE', () => {
         endsAt: null,
         trial: true,
         reason: 'Trial sin fin',
+        version: 1,
       }),
     });
     const body = await res.json();
@@ -305,7 +315,7 @@ describe('decisiones BO2: trial e INACTIVE', () => {
 
   it('INACTIVE se reactiva igual que SUSPENDED; no se puede suspender', async () => {
     const token = await login();
-    const reason = JSON.stringify({ reason: 'Vuelve a operar la clínica' });
+    const reason = JSON.stringify({ reason: 'Vuelve a operar la clínica', version: 1 });
     const suspend = await call('/clinics/c-piel-sana/suspend', {
       method: 'POST',
       token,
@@ -482,5 +492,274 @@ describe('BO3: D13–D16', () => {
     const { id: _i, code: _c, allowedLimits: _a, ...mf } = structuredClone(m);
     const modStale = await put(token, `/modules/${m.id}`, { ...mf, version: 99 });
     expect((await modStale.json()).code).toBe('VERSION_CONFLICT');
+  });
+});
+
+describe('BO4: versión de clínica, overrides y auditoría', () => {
+  const send = (token: string, method: string, path: string, body: unknown) =>
+    call(path, { method, token, body: JSON.stringify(body) });
+
+  it('D17: toda acción de clínica exige la versión vigente y la incrementa', async () => {
+    const token = await login();
+    const ok = await send(token, 'PATCH', '/clinics/c-darmas', {
+      name: 'DArmas',
+      reason: 'Cambio de razón social',
+      version: 1,
+    });
+    expect((await ok.json()).version).toBe(2);
+    for (const [method, path, body] of [
+      ['PATCH', '/clinics/c-darmas', { name: 'Otra', reason: 'Otro cambio de nombre' }],
+      ['POST', '/clinics/c-darmas/suspend', { reason: 'Suspensión con versión vieja' }],
+      ['PUT', '/clinics/c-darmas/specialty', { specialtyCode: 'GENERAL', reason: 'Versión vieja' }],
+      [
+        'PUT',
+        '/clinics/c-darmas/subscription',
+        {
+          planCode: 'PRO',
+          startsAt: '2026-10-01T00:00:00-04:00',
+          endsAt: null,
+          trial: false,
+          reason: 'Versión vieja',
+        },
+      ],
+      ['PUT', '/clinics/c-darmas/module-overrides', { overrides: [], reason: 'Versión vieja' }],
+    ] as const) {
+      const res = await send(token, method, path, { ...body, version: 1 });
+      expect(await res.json()).toMatchObject({
+        code: 'VERSION_CONFLICT',
+        details: { currentVersion: 2 },
+      });
+    }
+  });
+
+  it('D18: overrides con lista completa; SET y REMOVED auditados con motivo', async () => {
+    const token = await login();
+    const get = await (await call('/clinics/c-lara/module-overrides', { token })).json();
+    expect(get.version).toBe(1);
+    expect(get.overrides.map((o: { moduleCode: string }) => o.moduleCode)).toEqual([
+      'COMMS_WHATSAPP',
+      'AI_RECEPTIONIST',
+    ]);
+    // Quita COMMS_WHATSAPP, conserva AI_RECEPTIONIST, agrega GROWTH_REVIEWS.
+    const keep = get.overrides
+      .filter((o: { moduleCode: string }) => o.moduleCode === 'AI_RECEPTIONIST')
+      .map(({ moduleCode, enabled, reason, expiresAt }: Record<string, unknown>) => ({
+        moduleCode,
+        enabled,
+        reason,
+        expiresAt,
+      }));
+    const res = await send(token, 'PUT', '/clinics/c-lara/module-overrides', {
+      overrides: [
+        ...keep,
+        {
+          moduleCode: 'GROWTH_REVIEWS',
+          enabled: true,
+          reason: 'Piloto de reseñas',
+          expiresAt: null,
+        },
+      ],
+      reason: 'Reorganización de overrides',
+      version: 1,
+    });
+    const saved = await res.json();
+    expect(saved.version).toBe(2);
+    expect(saved.overrides.map((o: { moduleCode: string }) => o.moduleCode)).toEqual([
+      'AI_RECEPTIONIST',
+      'GROWTH_REVIEWS',
+    ]);
+    const events = getDb().auditLogs.slice(0, 2);
+    expect(events.map((e) => [e.action, e.entityId, e.reason])).toEqual([
+      ['MODULE_OVERRIDE_REMOVED', 'c-lara:COMMS_WHATSAPP', 'Reorganización de overrides'],
+      ['MODULE_OVERRIDE_SET', 'c-lara:GROWTH_REVIEWS', 'Reorganización de overrides'],
+    ]);
+  });
+
+  it('D18: vencimiento pasado y módulo duplicado se rechazan', async () => {
+    const token = await login();
+    const base = { reason: 'Prueba de validación', version: 1 };
+    const past = await send(token, 'PUT', '/clinics/c-vida/module-overrides', {
+      ...base,
+      overrides: [
+        {
+          moduleCode: 'GROWTH_REVIEWS',
+          enabled: true,
+          reason: 'Vence ayer',
+          expiresAt: '2020-01-01T00:00:00Z',
+        },
+      ],
+    });
+    expect((await past.json()).details.fields[0].message).toContain('futura');
+    const dup = await send(token, 'PUT', '/clinics/c-vida/module-overrides', {
+      ...base,
+      overrides: [
+        { moduleCode: 'GROWTH_REVIEWS', enabled: true, reason: 'Uno', expiresAt: null },
+        { moduleCode: 'GROWTH_REVIEWS', enabled: false, reason: 'Dos', expiresAt: null },
+      ],
+    });
+    expect((await dup.json()).code).toBe('VALIDATION_ERROR');
+  });
+
+  it('cada acción genera su evento de auditoría real', async () => {
+    const token = await login();
+    const actions = () => getDb().auditLogs[0].action;
+    const created = await (
+      await send(token, 'POST', '/clinics', {
+        name: 'Auditada',
+        slug: 'auditada',
+        specialtyCode: 'GENERAL',
+        planCode: 'BASIC',
+        trial: false,
+        trialEndsAt: null,
+        admin: { fullName: 'Admin', email: 'a@auditada.com' },
+      })
+    ).json();
+    expect(actions()).toBe('CLINIC_CREATED');
+    const id = created.id;
+    let v = 1;
+    const step = async (method: string, path: string, body: object, action: string) => {
+      const res = await send(token, method, path, { ...body, version: v });
+      expect(
+        res.ok,
+        `${method} ${path}: ${JSON.stringify(
+          await res
+            .clone()
+            .json()
+            .catch(() => null),
+        )}`,
+      ).toBe(true);
+      v += 1;
+      expect(actions()).toBe(action);
+    };
+    await step(
+      'PATCH',
+      `/clinics/${id}`,
+      { name: 'Auditada 2', reason: 'Cambio de nombre' },
+      'CLINIC_RENAMED',
+    );
+    await step(
+      'PUT',
+      `/clinics/${id}/subscription`,
+      {
+        planCode: 'PRO',
+        startsAt: '2026-10-01T00:00:00-04:00',
+        endsAt: null,
+        trial: false,
+        reason: 'Upgrade de plan',
+      },
+      'PLAN_CHANGED',
+    );
+    await step(
+      'PUT',
+      `/clinics/${id}/specialty`,
+      { specialtyCode: 'PODIATRY', reason: 'Cambio de rubro' },
+      'SPECIALTY_CHANGED',
+    );
+    await step(
+      'PUT',
+      `/clinics/${id}/module-overrides`,
+      {
+        overrides: [
+          {
+            moduleCode: 'GROWTH_REVIEWS',
+            enabled: true,
+            reason: 'Piloto de reseñas',
+            expiresAt: null,
+          },
+        ],
+        reason: 'Piloto de reseñas',
+      },
+      'MODULE_OVERRIDE_SET',
+    );
+    await step(
+      'PUT',
+      `/clinics/${id}/module-overrides`,
+      { overrides: [], reason: 'Fin del piloto' },
+      'MODULE_OVERRIDE_REMOVED',
+    );
+    await step('POST', `/clinics/${id}/suspend`, { reason: 'Falta de pago' }, 'CLINIC_SUSPENDED');
+    await step(
+      'POST',
+      `/clinics/${id}/reactivate`,
+      { reason: 'Pago recibido' },
+      'CLINIC_REACTIVATED',
+    );
+
+    const plan = getDb().plans.find((p) => p.id === 'p-basic')!;
+    v = plan.version;
+    await step(
+      'PUT',
+      '/plans/p-basic',
+      { name: 'Básico', active: true, sortOrder: 10 },
+      'PLAN_UPDATED',
+    );
+    await step(
+      'PUT',
+      '/plans/p-basic/modules',
+      { modules: plan.modules, reason: 'Revisión de matriz' },
+      'PLAN_MODULES_UPDATED',
+    );
+    await send(token, 'POST', '/modules', {
+      code: 'COMMS_SMS',
+      name: 'SMS',
+      category: 'COMMS',
+      requiredCore: false,
+      active: true,
+      compatibleSpecialties: [],
+      dependsOn: [],
+    });
+    expect(actions()).toBe('MODULE_CREATED');
+    const sms = getDb().modules.find((m) => m.code === 'COMMS_SMS')!;
+    const fields = {
+      name: 'SMS',
+      category: 'COMMS',
+      requiredCore: false,
+      compatibleSpecialties: [],
+      dependsOn: [],
+    };
+    v = sms.version;
+    await step(
+      'PUT',
+      `/modules/${sms.id}`,
+      { ...fields, active: true, name: 'SMS 2' },
+      'MODULE_UPDATED',
+    );
+    await step(
+      'PUT',
+      `/modules/${sms.id}`,
+      { ...fields, active: false, reason: 'Se pausa SMS' },
+      'MODULE_DEACTIVATED',
+    );
+  });
+
+  it('GET /audit-logs: filtros, orden, paginación y clinicName', async () => {
+    const token = await login();
+    const page = async (qs: string) => (await call(`/audit-logs?${qs}`, { token })).json();
+    const all = await page('size=100');
+    const dates = all.content.map((a: { createdAt: string }) => new Date(a.createdAt).getTime());
+    expect(dates).toEqual([...dates].sort((a, b) => b - a));
+    expect(all.content.find((a: { id: string }) => a.id === 'a-1').clinicName).toBe(
+      'Sonrisas del Norte',
+    );
+
+    const lara = await page('clinicId=c-lara');
+    expect(lara.content.every((a: { clinicId: string }) => a.clinicId === 'c-lara')).toBe(true);
+    const byActor = await page('actorId=u-mfa');
+    expect(byActor.content.map((a: { id: string }) => a.id)).toEqual(['a-4']);
+    const byAction = await page('action=PLAN_CHANGED');
+    expect(byAction.totalElements).toBe(1);
+    const range = await page(
+      `from=${encodeURIComponent('2026-09-01T00:00:00-04:00')}&to=${encodeURIComponent('2026-09-10T00:00:00-04:00')}`,
+    );
+    expect(range.content.map((a: { id: string }) => a.id)).toEqual(['a-1']);
+    const paged = await page('size=2&page=1');
+    expect(paged).toMatchObject({ page: 1, size: 2, totalElements: all.totalElements });
+    expect(paged.content).toHaveLength(2);
+  });
+
+  it('GET /users lista los usuarios KodeWave', async () => {
+    const token = await login();
+    const users = await (await call('/users', { token })).json();
+    expect(users[0]).toEqual({ id: 'u-admin', email: 'admin@kodewave.com', fullName: 'Ana Admin' });
   });
 });

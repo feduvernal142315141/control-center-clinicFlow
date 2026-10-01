@@ -1,5 +1,6 @@
 import type {
   DeniedReason,
+  KnownAuditAction,
   EffectiveModule,
   EffectiveSource,
   ModuleCategory,
@@ -53,6 +54,38 @@ const DENIED_REASON_LABEL: Record<DeniedReason, string> = {
   NOT_IN_PLAN: 'no está incluido en el plan',
   MISSING_DEPENDENCY: 'falta dependencia',
 };
+
+const AUDIT_ACTION_LABEL: Record<KnownAuditAction, string> = {
+  CLINIC_CREATED: 'Clínica creada',
+  CLINIC_RENAMED: 'Nombre cambiado',
+  PLAN_CHANGED: 'Plan / suscripción cambiado',
+  SPECIALTY_CHANGED: 'Especialidad cambiada',
+  CLINIC_SUSPENDED: 'Clínica suspendida',
+  CLINIC_REACTIVATED: 'Clínica reactivada',
+  MODULE_OVERRIDE_SET: 'Override aplicado',
+  MODULE_OVERRIDE_REMOVED: 'Override quitado',
+  PLAN_CREATED: 'Plan creado',
+  PLAN_UPDATED: 'Plan editado',
+  PLAN_MODULES_UPDATED: 'Matriz del plan editada',
+  MODULE_CREATED: 'Módulo creado',
+  MODULE_UPDATED: 'Módulo editado',
+  MODULE_DEACTIVATED: 'Módulo desactivado',
+};
+
+export const isKnownAuditAction = (action: string): action is KnownAuditAction =>
+  Object.hasOwn(AUDIT_ACTION_LABEL, action);
+
+const warnedUnknownActions = new Set<string>();
+
+/** Etiqueta de una acción. Una desconocida se muestra con su código, sin romper (D19). */
+export function auditActionLabel(action: string): string {
+  if (isKnownAuditAction(action)) return AUDIT_ACTION_LABEL[action];
+  if (!warnedUnknownActions.has(action)) {
+    warnedUnknownActions.add(action);
+    console.warn(`[contrato] acción de auditoría no reconocida: ${action}`);
+  }
+  return `Acción no reconocida: ${action}`;
+}
 
 const warnedUnknownReasons = new Set<string>();
 

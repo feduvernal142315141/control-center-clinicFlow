@@ -55,7 +55,7 @@ describe('SuspendClinicDialog', () => {
     await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
     await user.click(submit);
     await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
-    expect(bodies).toEqual([{ reason: REASON }]);
+    expect(bodies).toEqual([{ reason: REASON, version: 1 }]);
     expect(getDb().clinics.find((c) => c.id === 'c-darmas')!.operationalStatus).toBe('SUSPENDED');
   });
 
@@ -170,7 +170,7 @@ describe('RenameClinicDialog', () => {
     await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
     await user.click(screen.getByRole('button', { name: 'Guardar nombre' }));
     await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
-    expect(bodies).toEqual([{ name: "D'Armas Odontología", reason: REASON }]);
+    expect(bodies).toEqual([{ name: "D'Armas Odontología", reason: REASON, version: 1 }]);
   });
 });
 
@@ -195,7 +195,7 @@ describe('ChangeSpecialtyDialog', () => {
     await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
     await user.click(screen.getByRole('button', { name: 'Cambiar especialidad' }));
     await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
-    expect(bodies).toEqual([{ specialtyCode: 'PODIATRY', reason: REASON }]);
+    expect(bodies).toEqual([{ specialtyCode: 'PODIATRY', reason: REASON, version: 1 }]);
   });
 });
 
@@ -232,5 +232,61 @@ describe('ChangePlanDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Guardar suscripción' }));
     expect(await screen.findByText('Un trial necesita fecha de fin')).toBeInTheDocument();
     expect(bodies).toHaveLength(0);
+  });
+});
+
+describe('D17: VERSION_CONFLICT en acciones de clínica', () => {
+  it('suspender: aviso, recarga, conserva lo escrito y reintenta con la versión nueva', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    const bodies = spyBody('post', '/api/platform/clinics/c-darmas/suspend');
+    const reload = vi.fn(async () => 3);
+    renderWithClient(
+      <SuspendClinicDialog
+        clinic={clinic('c-darmas')}
+        open
+        onOpenChange={onOpenChange}
+        reload={reload}
+      />,
+    );
+    getDb().clinics.find((c) => c.id === 'c-darmas')!.version = 3; // otro editó
+    await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
+    await user.type(screen.getByLabelText(/para confirmar/), 'clinica-dental-darmas');
+    await user.click(screen.getByRole('button', { name: 'Suspender clínica' }));
+
+    expect(await screen.findByTestId('version-conflict')).toHaveTextContent(
+      'Alguien modificó esto mientras editabas',
+    );
+    expect(reload).toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(screen.getByLabelText('Motivo (obligatorio)')).toHaveValue(REASON);
+
+    await user.click(screen.getByRole('button', { name: 'Suspender clínica' }));
+    await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(bodies).toEqual([
+      { reason: REASON, version: 1 },
+      { reason: REASON, version: 3 },
+    ]);
+  });
+
+  it('editar nombre: "Descartar mis cambios" vuelve al nombre actual', async () => {
+    const user = userEvent.setup();
+    renderWithClient(
+      <RenameClinicDialog
+        clinic={clinic('c-darmas')}
+        open
+        onOpenChange={() => {}}
+        reload={async () => 2}
+      />,
+    );
+    getDb().clinics.find((c) => c.id === 'c-darmas')!.version = 2;
+    const name = screen.getByLabelText('Nombre');
+    await user.clear(name);
+    await user.type(name, 'Nombre nuevo');
+    await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
+    await user.click(screen.getByRole('button', { name: 'Guardar nombre' }));
+    await user.click(await screen.findByRole('button', { name: 'Descartar mis cambios' }));
+    expect(screen.getByLabelText('Nombre')).toHaveValue("Clínica Dental D'Armas");
+    expect(screen.queryByTestId('version-conflict')).not.toBeInTheDocument();
   });
 });

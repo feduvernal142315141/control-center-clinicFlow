@@ -18,6 +18,9 @@ import {
   type SpecialtyRow,
 } from './data';
 
+/** El nombre de la clínica se resuelve al consultar, como haría el backend con un join. */
+export type StoredAuditLog = Omit<AuditLog, 'clinicName'>;
+
 export interface MockDb {
   users: MockUser[];
   specialties: SpecialtyRow[];
@@ -26,7 +29,7 @@ export interface MockDb {
   clinics: ClinicDetail[];
   overrides: Record<string, ModuleOverride[]>;
   killSwitches: Set<string>;
-  auditLogs: AuditLog[];
+  auditLogs: StoredAuditLog[];
   accessTokens: Map<string, { userId: string; expiresAt: number }>;
   refreshTokens: Map<string, string>;
   mfaTokens: Map<string, { userId: string; expiresAt: number }>;

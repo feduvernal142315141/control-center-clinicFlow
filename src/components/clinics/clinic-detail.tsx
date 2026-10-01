@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { PageHeader } from '@/components/layout/page-header';
-import { ComingSoon } from '@/components/states/coming-soon';
+import { AuditLogView } from '@/components/audit/audit-log-view';
 import { EmptyState } from '@/components/states/empty-state';
 import { ErrorState } from '@/components/states/error-state';
 import { LoadingState } from '@/components/states/loading-state';
@@ -26,6 +26,7 @@ import {
   SuspendClinicDialog,
   type ClinicAction,
 } from './clinic-action-dialogs';
+import { ClinicOverridesTab } from './clinic-overrides-tab';
 import { ClinicStatusBadge, TrialBadge } from './clinic-status-badge';
 import { EffectiveModulesTable } from './effective-modules-table';
 
@@ -67,6 +68,7 @@ export function ClinicDetail({ clinicId }: { clinicId: string }) {
     clinic: c,
     open: action === a,
     onOpenChange: (open: boolean) => setAction(open ? a : null),
+    reload: async () => (await clinic.refetch()).data?.version,
   });
 
   return (
@@ -121,10 +123,10 @@ export function ClinicDetail({ clinicId }: { clinicId: string }) {
           <EffectiveModulesTable clinicId={c.id} />
         </TabsContent>
         <TabsContent value="overrides">
-          <ComingSoon phase="BO4" />
+          <ClinicOverridesTab clinic={c} />
         </TabsContent>
         <TabsContent value="auditoria">
-          <ComingSoon phase="BO4" />
+          <AuditLogView clinicId={c.id} />
         </TabsContent>
       </Tabs>
 

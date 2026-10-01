@@ -1,4 +1,4 @@
-import type { ClinicListQuery, EffectivePreviewQuery } from './schemas';
+import type { AuditLogQuery, ClinicListQuery, EffectivePreviewQuery } from './schemas';
 
 export const queryKeys = {
   me: ['platform', 'me'] as const,
@@ -9,6 +9,8 @@ export const queryKeys = {
     detail: (clinicId: string) => ['platform', 'clinics', 'detail', clinicId] as const,
     effectiveModules: (clinicId: string) =>
       ['platform', 'clinics', 'detail', clinicId, 'effective-modules'] as const,
+    overrides: (clinicId: string) =>
+      ['platform', 'clinics', 'detail', clinicId, 'module-overrides'] as const,
     effectivePreview: (clinicId: string, preview: EffectivePreviewQuery) =>
       ['platform', 'clinics', 'detail', clinicId, 'effective-modules', 'preview', preview] as const,
   },
@@ -18,4 +20,6 @@ export const queryKeys = {
   moduleUsage: (moduleId: string) => ['platform', 'modules', moduleId, 'usage'] as const,
   specialties: ['platform', 'specialties'] as const,
   auditLogs: ['platform', 'audit-logs'] as const,
+  auditLogList: (query: AuditLogQuery) => ['platform', 'audit-logs', query] as const,
+  users: ['platform', 'users'] as const,
 };

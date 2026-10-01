@@ -256,6 +256,7 @@ function clinic(
     planCode,
     trial,
     createdAt,
+    version: 1,
     subscription: planCode
       ? {
           id: `s-${id}`,
@@ -403,6 +404,17 @@ export const seedClinics: ClinicDetail[] = [
 ];
 
 export const seedOverrides: Record<string, ModuleOverride[]> = {
+  // Vencido: se lista aparte y no tiene efecto.
+  'c-darmas': [
+    {
+      moduleCode: 'GROWTH_REVIEWS',
+      enabled: true,
+      reason: 'Prueba de reseñas durante el congreso dental.',
+      createdBy: 'admin@kodewave.com',
+      createdAt: '2026-08-01T09:00:00-04:00',
+      expiresAt: '2026-09-01T23:59:59-04:00',
+    },
+  ],
   'c-lara': [
     {
       moduleCode: 'COMMS_WHATSAPP',
@@ -423,7 +435,7 @@ export const seedOverrides: Record<string, ModuleOverride[]> = {
   ],
 };
 
-export const seedAuditLogs: AuditLog[] = [
+export const seedAuditLogs: Omit<AuditLog, 'clinicName'>[] = [
   {
     id: 'a-1',
     actor: { id: 'u-admin', email: 'admin@kodewave.com' },
@@ -440,14 +452,54 @@ export const seedAuditLogs: AuditLog[] = [
   {
     id: 'a-2',
     actor: { id: 'u-admin', email: 'admin@kodewave.com' },
-    action: 'MODULE_OVERRIDES_UPDATED',
+    action: 'MODULE_OVERRIDE_SET',
     clinicId: 'c-lara',
     entityType: 'ModuleOverride',
-    entityId: 'c-lara',
-    before: [],
-    after: seedOverrides['c-lara'],
+    entityId: 'c-lara:AI_RECEPTIONIST',
+    before: null,
+    after: seedOverrides['c-lara'][1],
     reason: 'Piloto comercial de recepcionista IA aprobado por ventas.',
     ip: '10.0.0.12',
     createdAt: '2026-09-15T11:05:00-04:00',
+  },
+  {
+    id: 'a-3',
+    actor: { id: 'u-admin', email: 'admin@kodewave.com' },
+    action: 'MODULE_OVERRIDE_SET',
+    clinicId: 'c-lara',
+    entityType: 'ModuleOverride',
+    entityId: 'c-lara:COMMS_WHATSAPP',
+    before: null,
+    after: seedOverrides['c-lara'][0],
+    reason: 'La clínica pidió pausar WhatsApp mientras cambian de número.',
+    ip: '10.0.0.12',
+    createdAt: '2026-09-15T11:00:00-04:00',
+  },
+  {
+    id: 'a-4',
+    actor: { id: 'u-mfa', email: 'mfa@kodewave.com' },
+    action: 'PLAN_CHANGED',
+    clinicId: 'c-darmas',
+    entityType: 'Subscription',
+    entityId: 's-c-darmas',
+    before: { planCode: 'PRO', status: 'ACTIVE', trial: false },
+    after: { planCode: 'PREMIUM', status: 'ACTIVE', trial: false },
+    reason: 'Upgrade a Premium acordado con la clínica.',
+    ip: '10.0.0.20',
+    createdAt: '2026-08-20T16:30:00-04:00',
+  },
+  {
+    id: 'a-5',
+    actor: { id: 'u-admin', email: 'admin@kodewave.com' },
+    // D19: acción que el front no conoce; se muestra con su código.
+    action: 'LEGACY_IMPORT',
+    clinicId: 'c-sonrisas-norte',
+    entityType: 'Clinic',
+    entityId: 'c-sonrisas-norte',
+    before: null,
+    after: { source: 'ClinicaDental', importedModules: 9 },
+    reason: null,
+    ip: null,
+    createdAt: '2026-07-01T08:00:00-04:00',
   },
 ];

@@ -15,6 +15,8 @@ export const API_ERROR_CODES = {
   MODULE_DEPENDENCY_SELF: 'MODULE_DEPENDENCY_SELF',
   REQUIRED_CORE_IMMUTABLE: 'REQUIRED_CORE_IMMUTABLE',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
+  /** D16: la entidad cambió desde que se cargó (version distinta). */
+  VERSION_CONFLICT: 'VERSION_CONFLICT',
   // Auth
   UNAUTHENTICATED: 'UNAUTHENTICATED',
   INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
@@ -108,3 +110,6 @@ export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return 'Ocurrió un error inesperado.';
 }
+
+export const isVersionConflict = (error: unknown): error is ApiError =>
+  isApiError(error) && error.code === API_ERROR_CODES.VERSION_CONFLICT;

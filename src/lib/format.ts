@@ -54,12 +54,24 @@ const DENIED_REASON_LABEL: Record<DeniedReason, string> = {
   MISSING_DEPENDENCY: 'falta dependencia',
 };
 
+const warnedUnknownReasons = new Set<string>();
+
+const isKnownDeniedReason = (reason: string): reason is DeniedReason =>
+  Object.hasOwn(DENIED_REASON_LABEL, reason);
+
 /**
  * Por qué un módulo está OFF, en texto para operaciones. Solo traduce lo que manda
- * el backend: nunca recalcula nada.
+ * el backend: nunca recalcula nada. Un código desconocido no rompe la UI.
  */
 export function deniedReasonText(m: Pick<EffectiveModule, 'deniedReason' | 'missingDependencies'>) {
   if (!m.deniedReason) return null;
+  if (!isKnownDeniedReason(m.deniedReason)) {
+    if (!warnedUnknownReasons.has(m.deniedReason)) {
+      warnedUnknownReasons.add(m.deniedReason);
+      console.warn(`[contrato] deniedReason no reconocido: ${m.deniedReason}`);
+    }
+    return `OFF: Motivo no reconocido: ${m.deniedReason}`;
+  }
   const base = `OFF: ${DENIED_REASON_LABEL[m.deniedReason]}`;
   if (m.deniedReason === 'MISSING_DEPENDENCY' && m.missingDependencies?.length) {
     return `${base} ${m.missingDependencies.join(', ')}`;

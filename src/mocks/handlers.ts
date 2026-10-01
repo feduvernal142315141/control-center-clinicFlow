@@ -4,9 +4,11 @@ import {
   changeSpecialtyInputSchema,
   changeSubscriptionInputSchema,
   createClinicInputSchema,
-  moduleInputSchema,
+  moduleCreateInputSchema,
+  moduleUpdateInputSchema,
   moduleOverrideInputSchema,
-  planInputSchema,
+  planCreateInputSchema,
+  planUpdateInputSchema,
   planModulesInputSchema,
   reasonInputSchema,
   updateClinicInputSchema,
@@ -15,6 +17,7 @@ import {
   type Dashboard,
   type ModuleOverride,
   type Page,
+  type PlanModule,
   type PlatformMe,
 } from '@/lib/api/schemas';
 import { MOCK_TOTP_CODE, type MockUser } from './data';
@@ -115,14 +118,100 @@ export interface PlatformHandlersOptions {
 
 let handlerOptions: PlatformHandlersOptions = {};
 
+/**
+ * D8: un trial vencido pasa a PAST_DUE y la clínica sigue ACTIVE. Nada se suspende solo.
+ * En el backend real es un job; aquí se aplica al vuelo en cada request.
+ */
+export function expireTrials(db: MockDb, now = Date.now()) {
+  for (const c of db.clinics) {
+    const s = c.subscription;
+    if (s?.trial && s.status === 'TRIAL' && s.endsAt && new Date(s.endsAt).getTime() < now) {
+      s.status = 'PAST_DUE';
+    }
+  }
+}
+
 /** Envuelve un resolver que exige sesión de plataforma. */
 function authed(resolver: (ctx: Ctx) => Response | Promise<Response>) {
   return ({ request, params }: { request: Request; params: Record<string, unknown> }) => {
     const db = getDb();
+    expireTrials(db);
     const user = handlerOptions.skipAuth ? db.users[0] : currentUser(db, request);
     if (!user) return err(401, 'UNAUTHENTICATED', 'Token inválido o expirado.');
     return resolver({ db, user, request, params: params as Record<string, string> });
   };
+}
+
+const SEVEN_DAYS_MS = 7 * 86_400_000;
+
+function trialLists(db: MockDb, now = Date.now()) {
+  const item = (c: ClinicDetail) => ({
+    clinicId: c.id,
+    name: c.name,
+    slug: c.slug,
+    planCode: c.subscription!.planCode,
+    endsAt: c.subscription!.endsAt!,
+  });
+  const trials = db.clinics.filter((c) => c.subscription?.trial && c.subscription.endsAt);
+  const byEnd = (a: { endsAt: string }, b: { endsAt: string }) => a.endsAt.localeCompare(b.endsAt);
+  return {
+    expired: trials
+      .filter((c) => c.subscription!.status === 'PAST_DUE')
+      .map(item)
+      .sort(byEnd),
+    expiringSoon: trials
+      .filter((c) => {
+        const ends = new Date(c.subscription!.endsAt!).getTime();
+        return c.subscription!.status === 'TRIAL' && ends >= now && ends <= now + SEVEN_DAYS_MS;
+      })
+      .map(item)
+      .sort(byEnd),
+  };
+}
+
+/** MODULE_DEPENDENCY_SELF / desconocida / MODULE_DEPENDENCY_CYCLE, o null si es válido. */
+function validateDependencies(db: MockDb, code: string, dependsOn: string[]) {
+  if (dependsOn.includes(code)) {
+    return err(409, 'MODULE_DEPENDENCY_SELF', 'Un módulo no puede depender de sí mismo.', {
+      cycle: [code, code],
+    });
+  }
+  const unknown = dependsOn.filter((d) => !db.modules.some((m) => m.code === d));
+  if (unknown.length) return notFound(`Dependencia ${unknown.join(', ')}`);
+  const cycle = findDependencyCycle(db, code, dependsOn);
+  if (cycle) {
+    return err(409, 'MODULE_DEPENDENCY_CYCLE', `Ciclo de dependencias: ${cycle.join(' → ')}`, {
+      cycle,
+    });
+  }
+  return null;
+}
+
+/** D16: control de concurrencia optimista. */
+function versionConflict(entity: string, currentVersion: number) {
+  return err(
+    409,
+    'VERSION_CONFLICT',
+    `${entity} fue modificado por otra persona. Recarga y vuelve a intentar.`,
+    { currentVersion },
+  );
+}
+
+/** D15: solo claves de `allowedLimits` del módulo. */
+function validateLimits(db: MockDb, modules: PlanModule[]) {
+  const fields: { field: string; message: string }[] = [];
+  modules.forEach((pm, i) => {
+    const allowed = db.modules.find((m) => m.code === pm.moduleCode)?.allowedLimits ?? [];
+    for (const key of Object.keys(pm.limits ?? {})) {
+      if (!allowed.some((l) => l.key === key)) {
+        fields.push({
+          field: `modules.${i}.limits.${key}`,
+          message: `${pm.moduleCode} no admite el límite ${key}`,
+        });
+      }
+    }
+  });
+  return fields.length ? err(400, 'VALIDATION_ERROR', 'Límites no permitidos.', { fields }) : null;
 }
 
 function findClinic(db: MockDb, id: string) {
@@ -230,7 +319,7 @@ export function createPlatformHandlers(
           totalClinics: db.clinics.length,
           active: status('ACTIVE'),
           // El trial se cuenta desde la suscripción, no desde el estado operativo.
-          trial: db.clinics.filter((c) => c.subscription?.trial).length,
+          trial: db.clinics.filter((c) => c.subscription?.status === 'TRIAL').length,
           suspended: status('SUSPENDED'),
           inactive: status('INACTIVE'),
           byPlan: by((c) => c.planCode ?? '__NONE__').map(([planCode, count]) => ({
@@ -241,6 +330,7 @@ export function createPlatformHandlers(
             specialtyCode,
             count,
           })),
+          trials: trialLists(db),
         });
       }),
     ),
@@ -521,7 +611,7 @@ export function createPlatformHandlers(
     http.post(
       u('/plans'),
       authed(async ({ db, user, request }) => {
-        const body = await parseBody(request, planInputSchema);
+        const body = await parseBody(request, planCreateInputSchema);
         if ('response' in body) return body.response;
         if (db.plans.some((p) => p.code === body.data.code)) {
           return err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
@@ -531,6 +621,8 @@ export function createPlatformHandlers(
         const plan = {
           ...body.data,
           id: nextId(db, 'p'),
+          version: 1,
+          // Un plan nuevo arranca solo con los core.
           modules: db.modules.map((m) => ({ moduleCode: m.code, enabled: m.requiredCore })),
         };
         db.plans.push(plan);
@@ -559,10 +651,15 @@ export function createPlatformHandlers(
       authed(async ({ db, user, request, params }) => {
         const plan = db.plans.find((p) => p.id === params.planId);
         if (!plan) return notFound('Plan');
-        const body = await parseBody(request, planInputSchema);
+        // El code no viene en el body: no se puede editar.
+        const body = await parseBody(request, planUpdateInputSchema);
         if ('response' in body) return body.response;
+        const { version, ...fields } = body.data;
+        if (version !== plan.version) return versionConflict('El plan', plan.version);
         const before = structuredClone(plan);
-        Object.assign(plan, body.data);
+        Object.assign(plan, fields);
+        if (!fields.description) delete plan.description;
+        plan.version += 1;
         audit(db, request, user, {
           action: 'PLAN_UPDATED',
           clinicId: null,
@@ -607,19 +704,36 @@ export function createPlatformHandlers(
         if (!plan) return notFound('Plan');
         const body = await parseBody(request, planModulesInputSchema);
         if ('response' in body) return body.response;
+        if (body.data.version !== plan.version) return versionConflict('El plan', plan.version);
+        const badLimits = validateLimits(db, body.data.modules);
+        if (badLimits) return badLimits;
         for (const pm of body.data.modules) {
-          const m = db.modules.find((x) => x.code === pm.moduleCode);
-          if (!m) return notFound(`Módulo ${pm.moduleCode}`);
-          if (m.requiredCore && !pm.enabled) {
-            return err(
-              409,
-              'REQUIRED_CORE_IMMUTABLE',
-              `${m.code} es core obligatorio: no se puede apagar.`,
-            );
+          if (!db.modules.some((x) => x.code === pm.moduleCode)) {
+            return notFound(`Módulo ${pm.moduleCode}`);
           }
         }
+        // Matriz completa: lo que no venga queda OFF; un core nunca puede quedar OFF.
+        const next = db.modules.map(
+          (m) =>
+            body.data.modules.find((pm) => pm.moduleCode === m.code) ?? {
+              moduleCode: m.code,
+              enabled: false,
+            },
+        );
+        const coreOff = next.find(
+          (pm) => !pm.enabled && db.modules.find((m) => m.code === pm.moduleCode)!.requiredCore,
+        );
+        if (coreOff) {
+          return err(
+            409,
+            'REQUIRED_CORE_IMMUTABLE',
+            `${coreOff.moduleCode} es core obligatorio: no se puede apagar.`,
+          );
+        }
+        // Las dependencias faltantes NO se rechazan: se resuelven en módulos efectivos.
         const before = plan.modules;
-        plan.modules = body.data.modules;
+        plan.modules = next;
+        plan.version += 1;
         audit(db, request, user, {
           action: 'PLAN_MODULES_UPDATED',
           clinicId: null,
@@ -627,6 +741,7 @@ export function createPlatformHandlers(
           entityId: plan.id,
           before,
           after: plan.modules,
+          reason: body.data.reason,
         });
         return HttpResponse.json(plan);
       }),
@@ -646,96 +761,124 @@ export function createPlatformHandlers(
       }),
     ),
 
-    ...(['post', 'put'] as const).map((method) =>
-      http[method](
-        u(method === 'post' ? '/modules' : '/modules/:moduleId'),
-        authed(async ({ db, user, request, params }) => {
-          const existing =
-            method === 'put' ? db.modules.find((x) => x.id === params.moduleId) : undefined;
-          if (method === 'put' && !existing) return notFound('Módulo');
-          const body = await parseBody(request, moduleInputSchema);
-          if ('response' in body) return body.response;
-          const input = body.data;
-          if (method === 'post' && db.modules.some((m) => m.code === input.code)) {
-            return err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
-              fields: [{ field: 'code', message: 'Ese código ya existe' }],
-            });
-          }
-          if (existing?.requiredCore && (!input.active || !input.requiredCore)) {
-            return err(409, 'REQUIRED_CORE_IMMUTABLE', 'Un módulo core no se puede desactivar.');
-          }
-          if (input.dependsOn.includes(input.code)) {
-            return err(409, 'MODULE_DEPENDENCY_SELF', 'Un módulo no puede depender de sí mismo.');
-          }
-          const unknown = input.dependsOn.filter((d) => !db.modules.some((m) => m.code === d));
-          if (unknown.length) return notFound(`Dependencia ${unknown.join(', ')}`);
-          const cycle = findDependencyCycle(db, input.code, input.dependsOn);
-          if (cycle) {
-            return err(
-              409,
-              'MODULE_DEPENDENCY_CYCLE',
-              `Ciclo de dependencias: ${cycle.join(' → ')}`,
-              {
-                cycle,
-              },
-            );
-          }
-          const before = existing ? structuredClone(existing) : null;
-          const saved = { ...existing, ...input, id: existing?.id ?? nextId(db, 'm') };
-          if (existing) Object.assign(existing, saved);
-          else {
-            db.modules.push(saved);
-            for (const plan of db.plans)
-              plan.modules.push({ moduleCode: saved.code, enabled: saved.requiredCore });
-          }
-          audit(db, request, user, {
-            action: existing ? 'MODULE_UPDATED' : 'MODULE_CREATED',
-            clinicId: null,
-            entityType: 'Module',
-            entityId: saved.id,
-            before,
-            after: saved,
-          });
-          return HttpResponse.json(saved, { status: existing ? 200 : 201 });
-        }),
-      ),
-    ),
-
-    http.delete(
-      u('/modules/:moduleId'),
-      authed(({ db, user, request, params }) => {
-        const m = db.modules.find((x) => x.id === params.moduleId);
-        if (!m) return notFound('Módulo');
-        if (m.requiredCore) {
-          return err(409, 'REQUIRED_CORE_IMMUTABLE', 'Un módulo core no se puede borrar.');
-        }
-        const dependents = db.modules
-          .filter((x) => x.dependsOn.includes(m.code))
-          .map((x) => x.code);
-        if (dependents.length) {
-          return err(409, 'MODULE_HAS_DEPENDENTS', `Otros módulos dependen de ${m.code}.`, {
-            dependents,
+    http.post(
+      u('/modules'),
+      authed(async ({ db, user, request }) => {
+        const body = await parseBody(request, moduleCreateInputSchema);
+        if ('response' in body) return body.response;
+        const input = body.data;
+        if (db.modules.some((m) => m.code === input.code)) {
+          return err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
+            fields: [{ field: 'code', message: 'Ese código ya existe' }],
           });
         }
-        db.modules = db.modules.filter((x) => x.id !== m.id);
-        for (const plan of db.plans)
-          plan.modules = plan.modules.filter((pm) => pm.moduleCode !== m.code);
+        const invalid = validateDependencies(db, input.code, input.dependsOn);
+        if (invalid) return invalid;
+        const saved = { ...input, id: nextId(db, 'm'), allowedLimits: [], version: 1 };
+        db.modules.push(saved);
+        // D13: se agrega a todos los planes en OFF (en ON si es core).
+        for (const plan of db.plans) {
+          plan.modules.push({ moduleCode: saved.code, enabled: saved.requiredCore });
+          plan.version += 1;
+        }
         audit(db, request, user, {
-          action: 'MODULE_DELETED',
+          action: 'MODULE_CREATED',
           clinicId: null,
           entityType: 'Module',
-          entityId: m.id,
-          before: m,
-          after: null,
+          entityId: saved.id,
+          before: null,
+          after: saved,
         });
-        return new HttpResponse(null, { status: 204 });
+        return HttpResponse.json(saved, { status: 201 });
+      }),
+    ),
+
+    http.put(
+      u('/modules/:moduleId'),
+      authed(async ({ db, user, request, params }) => {
+        const existing = db.modules.find((x) => x.id === params.moduleId);
+        if (!existing) return notFound('Módulo');
+        // El code no viene en el body: no se puede editar.
+        const body = await parseBody(request, moduleUpdateInputSchema);
+        if ('response' in body) return body.response;
+        const { version, reason, ...input } = body.data;
+        if (version !== existing.version) return versionConflict('El módulo', existing.version);
+        if (existing.requiredCore && (!input.active || !input.requiredCore)) {
+          return err(
+            409,
+            'REQUIRED_CORE_IMMUTABLE',
+            'Un módulo core obligatorio no se puede desactivar ni dejar de ser core.',
+          );
+        }
+        // D14: desactivar un módulo comercial exige motivo.
+        if (existing.active && !input.active && !reason) {
+          return err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
+            fields: [{ field: 'reason', message: 'El motivo es obligatorio para desactivar' }],
+          });
+        }
+        const invalid = validateDependencies(db, existing.code, input.dependsOn);
+        if (invalid) return invalid;
+        const before = structuredClone(existing);
+        Object.assign(existing, input);
+        if (!input.description) delete existing.description;
+        existing.version += 1;
+        // Un módulo que pasa a core queda ON en todos los planes.
+        if (existing.requiredCore && !before.requiredCore) {
+          for (const plan of db.plans) {
+            const pm = plan.modules.find((x) => x.moduleCode === existing.code);
+            if (pm && !pm.enabled) {
+              pm.enabled = true;
+              plan.version += 1;
+            }
+          }
+        }
+        audit(db, request, user, {
+          action: 'MODULE_UPDATED',
+          clinicId: null,
+          entityType: 'Module',
+          entityId: existing.id,
+          before,
+          after: existing,
+          reason: reason ?? null,
+        });
+        return HttpResponse.json(existing);
+      }),
+    ),
+
+    // D14: en V1 un módulo no se borra, solo se desactiva. Uso actual para el modal.
+    http.get(
+      u('/modules/:moduleId/usage'),
+      authed(({ db, params }) => {
+        const m = db.modules.find((x) => x.id === params.moduleId);
+        if (!m) return notFound('Módulo');
+        const using = db.clinics
+          .filter((c) =>
+            resolveEffectiveModules(db, c.id)?.some((e) => e.code === m.code && e.enabled),
+          )
+          .sort((x, y) => x.name.localeCompare(y.name, 'es'));
+        return HttpResponse.json({
+          clinicCount: using.length,
+          clinics: using.slice(0, 10).map((c) => ({ clinicId: c.id, name: c.name, slug: c.slug })),
+        });
       }),
     ),
 
     // ---- Especialidades ----
     http.get(
       u('/specialties'),
-      authed(({ db }) => HttpResponse.json(db.specialties)),
+      authed(({ db }) =>
+        HttpResponse.json(
+          db.specialties.map((s) => ({
+            ...s,
+            clinicCount: db.clinics.filter((c) => c.specialtyCode === s.code).length,
+            compatibleModuleCount: db.modules.filter(
+              (m) =>
+                m.active &&
+                (m.compatibleSpecialties.length === 0 || m.compatibleSpecialties.includes(s.code)),
+            ).length,
+          })),
+        ),
+      ),
     ),
 
     // ---- Auditoría ----

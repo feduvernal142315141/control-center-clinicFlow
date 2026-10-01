@@ -14,6 +14,18 @@ declare module '@tanstack/react-query' {
 
 let redirecting = false;
 
+/**
+ * Logout voluntario en curso: las queries que fallen con 401 mientras tanto no deben
+ * disparar el flujo de "sesión expirada" (redirigiría a /login?reason=expired).
+ */
+export function beginLogout() {
+  redirecting = true;
+}
+
+export function cancelLogout() {
+  redirecting = false;
+}
+
 /** Sesión inválida o token que no es de plataforma: cerrar sesión y volver al login. */
 async function handleAuthFailure(code: string) {
   if (redirecting || typeof window === 'undefined') return;

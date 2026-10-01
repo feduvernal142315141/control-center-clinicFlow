@@ -34,6 +34,16 @@ export const deniedReasonSchema = z.enum([
 ]);
 export type DeniedReason = z.infer<typeof deniedReasonSchema>;
 
+/**
+ * Motivo tolerante: los conocidos quedan tipados; un código nuevo del backend (con formato
+ * de código) se acepta y la UI lo muestra como "Motivo no reconocido". Agregar un
+ * deniedReason en el backend no rompe el front.
+ */
+export const anyDeniedReasonSchema = z.union([
+  deniedReasonSchema,
+  z.string().regex(/^[A-Z][A-Z0-9_]*$/, 'deniedReason debe ser un código en mayúsculas'),
+]);
+
 export const effectiveModuleSchema = z
   .object({
     code: moduleCodeSchema,
@@ -42,7 +52,7 @@ export const effectiveModuleSchema = z
     requiredCore: z.boolean(),
     enabled: z.boolean(),
     source: effectiveSourceSchema.nullable(),
-    deniedReason: deniedReasonSchema.nullable(),
+    deniedReason: anyDeniedReasonSchema.nullable(),
     missingDependencies: z.array(moduleCodeSchema).optional(),
     override: moduleOverrideSchema.optional(),
   })

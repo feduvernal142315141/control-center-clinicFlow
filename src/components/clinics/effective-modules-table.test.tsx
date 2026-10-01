@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { renderWithClient, setupMockApi } from '@test/render';
 import { EffectiveModulesTable } from './effective-modules-table';
 
@@ -87,5 +87,39 @@ describe('EffectiveModulesTable', () => {
     );
     renderWithClient(<EffectiveModulesTable clinicId="x" />);
     expect(await screen.findByText('CONTRACT_MISMATCH · HTTP 200')).toBeInTheDocument();
+  });
+
+  it('deniedReason desconocido: fila OFF con el código y console.warn', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    server.use(
+      http.get('http://localhost:3000/api/platform/clinics/x/effective-modules', () =>
+        HttpResponse.json([
+          {
+            code: 'AI_RECEPTIONIST',
+            name: 'Recepcionista IA',
+            category: 'AI',
+            requiredCore: false,
+            enabled: false,
+            source: null,
+            deniedReason: 'BILLING_HOLD',
+          },
+          {
+            code: 'CORE_PATIENTS',
+            name: 'Pacientes',
+            category: 'CORE',
+            requiredCore: true,
+            enabled: true,
+            source: 'REQUIRED_CORE',
+            deniedReason: null,
+          },
+        ]),
+      ),
+    );
+    renderWithClient(<EffectiveModulesTable clinicId="x" />);
+    expect(await screen.findByTestId('denied-AI_RECEPTIONIST')).toHaveTextContent(
+      'OFF: Motivo no reconocido: BILLING_HOLD',
+    );
+    expect(screen.getByText('CORE_PATIENTS')).toBeInTheDocument();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('BILLING_HOLD'));
   });
 });

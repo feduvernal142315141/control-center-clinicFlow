@@ -1,12 +1,22 @@
 'use client';
 
-import { Building2, CircleCheck, CircleDashed, CirclePause, CircleSlash } from 'lucide-react';
+import {
+  AlarmClock,
+  Building2,
+  CircleCheck,
+  CircleDashed,
+  CirclePause,
+  CircleSlash,
+  TriangleAlert,
+} from 'lucide-react';
 import Link from 'next/link';
 import { ErrorState } from '@/components/states/error-state';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCatalogNames } from '@/lib/api/hooks/use-catalogs';
 import { useDashboard } from '@/lib/api/hooks/use-clinics';
+import type { TrialItem } from '@/lib/api/schemas';
+import { formatDate } from '@/lib/format';
 
 const TILES: {
   key: 'totalClinics' | 'active' | 'trial' | 'suspended' | 'inactive';
@@ -81,7 +91,87 @@ export function DashboardView() {
           }))}
         />
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Trials</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-6 lg:grid-cols-2">
+          <TrialList
+            title="Vencidos"
+            description="Suscripción en pago vencido. La clínica sigue activa: suspender es manual."
+            icon={<TriangleAlert className="size-4 text-destructive" aria-hidden />}
+            items={data?.trials.expired}
+            dateLabel="Venció"
+            planName={planName}
+            empty="No hay trials vencidos."
+          />
+          <TrialList
+            title="Vencen en los próximos 7 días"
+            icon={<AlarmClock className="size-4 text-warning" aria-hidden />}
+            items={data?.trials.expiringSoon}
+            dateLabel="Vence"
+            planName={planName}
+            empty="Ningún trial vence esta semana."
+          />
+        </CardContent>
+      </Card>
     </div>
+  );
+}
+
+function TrialList({
+  title,
+  description,
+  icon,
+  items,
+  dateLabel,
+  planName,
+  empty,
+}: {
+  title: string;
+  description?: string;
+  icon: React.ReactNode;
+  items: TrialItem[] | undefined;
+  dateLabel: string;
+  planName: (code: string | null) => string;
+  empty: string;
+}) {
+  return (
+    <section className="space-y-2">
+      <h3 className="flex items-center gap-2 text-sm font-medium">
+        {icon}
+        {title}
+        {items && <span className="text-muted-foreground">({items.length})</span>}
+      </h3>
+      {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      {!items ? (
+        <Skeleton className="h-16 w-full" />
+      ) : items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{empty}</p>
+      ) : (
+        <ul className="divide-y rounded-md border" aria-label={title}>
+          {items.map((t) => (
+            <li key={t.clinicId}>
+              <Link
+                href={`/clinicas/${t.clinicId}`}
+                className="flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-muted/40"
+              >
+                <span>
+                  <span className="font-medium">{t.name}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {planName(t.planCode)}
+                  </span>
+                </span>
+                <span className="text-xs whitespace-nowrap text-muted-foreground">
+                  {dateLabel} {formatDate(t.endsAt)}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

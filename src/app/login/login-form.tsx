@@ -44,10 +44,9 @@ export function LoginForm({
   const router = useRouter();
   const [step, setStep] = useState<'credentials' | 'mfa'>('credentials');
 
-  const onAuthenticated = () => {
-    router.replace(nextPath);
-    router.refresh();
-  };
+  // Sin router.refresh(): no hay datos de servidor que dependan de la sesión y el refresh
+  // compite con la primera navegación del usuario.
+  const onAuthenticated = () => router.replace(nextPath);
 
   const handleResult = (result: BffAuthResult) => {
     if (result.status === 'AUTHENTICATED') return onAuthenticated();

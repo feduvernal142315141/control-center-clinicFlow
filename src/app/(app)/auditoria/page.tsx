@@ -1,14 +1,21 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
+import { AuditLogView } from '@/components/audit/audit-log-view';
 import { PageHeader } from '@/components/layout/page-header';
-import { ComingSoon } from '@/components/states/coming-soon';
+import { LoadingState } from '@/components/states/loading-state';
 
 export const metadata: Metadata = { title: 'Auditoría' };
 
-export default function Page() {
+export default function AuditPage() {
   return (
     <>
-      <PageHeader title="Auditoría" description="Registro de cambios con before/after." />
-      <ComingSoon phase="BO4" />
+      <PageHeader
+        title="Auditoría"
+        description="Todo cambio hecho desde el Control Center, con motivo y antes/después."
+      />
+      <Suspense fallback={<LoadingState rows={8} />}>
+        <AuditLogView />
+      </Suspense>
     </>
   );
 }

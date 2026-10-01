@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import { platformRequest } from '../client';
 import {
+  auditLogPageSchema,
   clinicDetailSchema,
+  clinicOverridesSchema,
   clinicPageSchema,
   dashboardSchema,
   effectiveModuleSchema,
@@ -9,10 +11,14 @@ import {
   platformMeSchema,
   moduleUsageSchema,
   platformModuleSchema,
+  platformUserSchema,
   specialtySchema,
   type ChangeSpecialtyInput,
   type ChangeSubscriptionInput,
+  type AuditLogQuery,
   type ClinicListQuery,
+  type ClinicOverridesUpdateInput,
+  type ClinicStatusInput,
   type CreateClinicInput,
   type EffectivePreviewQuery,
   type ModuleCreateInput,
@@ -20,7 +26,6 @@ import {
   type PlanCreateInput,
   type PlanModulesInput,
   type PlanUpdateInput,
-  type ReasonInput,
   type UpdateClinicInput,
 } from '../schemas';
 
@@ -48,13 +53,13 @@ export const platformApi = {
       body: input,
       schema: clinicDetailSchema,
     }),
-  suspendClinic: (clinicId: string, input: ReasonInput) =>
+  suspendClinic: (clinicId: string, input: ClinicStatusInput) =>
     platformRequest(`${clinicPath(clinicId)}/suspend`, {
       method: 'POST',
       body: input,
       schema: clinicDetailSchema,
     }),
-  reactivateClinic: (clinicId: string, input: ReasonInput) =>
+  reactivateClinic: (clinicId: string, input: ClinicStatusInput) =>
     platformRequest(`${clinicPath(clinicId)}/reactivate`, {
       method: 'POST',
       body: input,
@@ -79,6 +84,24 @@ export const platformApi = {
       schema: z.array(effectiveModuleSchema),
       signal,
     }),
+
+  moduleOverrides: (clinicId: string, signal?: AbortSignal) =>
+    platformRequest(`${clinicPath(clinicId)}/module-overrides`, {
+      schema: clinicOverridesSchema,
+      signal,
+    }),
+  updateModuleOverrides: (clinicId: string, input: ClinicOverridesUpdateInput) =>
+    platformRequest(`${clinicPath(clinicId)}/module-overrides`, {
+      method: 'PUT',
+      body: input,
+      schema: clinicOverridesSchema,
+    }),
+
+  // ---- Auditoría ----
+  auditLogs: (query: AuditLogQuery, signal?: AbortSignal) =>
+    platformRequest('/audit-logs', { query, schema: auditLogPageSchema, signal }),
+  listUsers: (signal?: AbortSignal) =>
+    platformRequest('/users', { schema: z.array(platformUserSchema), signal }),
 
   // ---- Planes ----
   listPlans: (signal?: AbortSignal) =>

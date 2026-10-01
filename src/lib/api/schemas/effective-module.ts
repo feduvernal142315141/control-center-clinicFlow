@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isoDateTime, reasonSchema } from './common';
+import { isoDateTime, reasonSchema, versionSchema } from './common';
 import { moduleCategorySchema, moduleCodeSchema } from './module';
 
 export const moduleOverrideSchema = z.object({
@@ -19,6 +19,24 @@ export const moduleOverrideInputSchema = z.object({
   expiresAt: isoDateTime.nullable(),
 });
 export type ModuleOverrideInput = z.infer<typeof moduleOverrideInputSchema>;
+
+/** GET y respuesta de PUT /platform/clinics/{id}/module-overrides. `version` = la de la clínica. */
+export const clinicOverridesSchema = z.object({
+  overrides: z.array(moduleOverrideSchema),
+  version: versionSchema,
+});
+export type ClinicOverrides = z.infer<typeof clinicOverridesSchema>;
+
+/**
+ * PUT /platform/clinics/{id}/module-overrides: lista completa (lo que no venga se quita),
+ * motivo del cambio y versión de la clínica (D17, D18).
+ */
+export const clinicOverridesUpdateInputSchema = z.object({
+  overrides: z.array(moduleOverrideInputSchema),
+  reason: reasonSchema,
+  version: versionSchema,
+});
+export type ClinicOverridesUpdateInput = z.infer<typeof clinicOverridesUpdateInputSchema>;
 
 export const effectiveSourceSchema = z.enum(['REQUIRED_CORE', 'PLAN', 'OVERRIDE']);
 export type EffectiveSource = z.infer<typeof effectiveSourceSchema>;

@@ -3,7 +3,7 @@
 import { createColumnHelper } from '@tanstack/react-table';
 import { ChevronLeft, ChevronRight, Search, X } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { EmptyState } from '@/components/states/empty-state';
 import { ErrorState } from '@/components/states/error-state';
@@ -20,6 +20,7 @@ import {
   type ClinicSummary,
 } from '@/lib/api/schemas';
 import { formatDate, OPERATIONAL_STATUS_LABEL } from '@/lib/format';
+import { useSearchParamsUpdater } from '@/lib/use-search-params-updater';
 import { ClinicStatusBadge, TrialBadge } from './clinic-status-badge';
 
 export const PAGE_SIZE = 10;
@@ -27,8 +28,7 @@ export const PAGE_SIZE = 10;
 /** Estado de la lista ⇄ query string (enlaces compartibles, botón atrás). */
 function useListQuery(): [ClinicListQuery, (patch: Partial<ClinicListQuery>) => void] {
   const params = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
+  const replaceParams = useSearchParamsUpdater();
 
   const query = useMemo<ClinicListQuery>(() => {
     const status = operationalStatusSchema.safeParse(params.get('status'));
@@ -45,17 +45,16 @@ function useListQuery(): [ClinicListQuery, (patch: Partial<ClinicListQuery>) => 
     };
   }, [params]);
 
-  const update = (patch: Partial<ClinicListQuery>) => {
-    const next = new URLSearchParams(params);
-    // Cualquier cambio de filtro vuelve a la primera página.
-    if (!('page' in patch)) next.delete('page');
-    for (const [key, value] of Object.entries(patch)) {
-      if (value === undefined || value === '' || (key === 'page' && value === 0)) next.delete(key);
-      else next.set(key, String(value));
-    }
-    const qs = next.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  };
+  const update = (patch: Partial<ClinicListQuery>) =>
+    replaceParams((next) => {
+      // Cualquier cambio de filtro vuelve a la primera página.
+      if (!('page' in patch)) next.delete('page');
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined || value === '' || (key === 'page' && value === 0))
+          next.delete(key);
+        else next.set(key, String(value));
+      }
+    });
 
   return [query, update];
 }

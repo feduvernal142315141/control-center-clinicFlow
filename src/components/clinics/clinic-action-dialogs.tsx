@@ -2,10 +2,12 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertTriangle } from 'lucide-react';
-import { useForm } from 'react-hook-form';
+import { useEffect, useState } from 'react';
+import { useForm, type FieldValues, type UseFormSetError } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import { ActionDialog, ReasonField, useResetOnOpen } from '@/components/shared/action-dialog';
+import { ConflictBanner } from '@/components/shared/conflict-banner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { FormField } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
@@ -21,6 +23,7 @@ import {
 import { clinicNameSchema, reasonSchema, type ClinicDetail } from '@/lib/api/schemas';
 import { fromDateInput, toDateInput } from '@/lib/dates';
 import { OPERATIONAL_STATUS_LABEL } from '@/lib/format';
+import { isVersionConflict } from '@/lib/api/errors';
 import { applyFieldErrors } from '@/lib/forms';
 import { ModuleImpactPreview } from './module-impact-preview';
 
@@ -30,14 +33,51 @@ interface DialogProps {
   clinic: ClinicDetail;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Recarga la clínica y devuelve su versión actual (D17). */
+  reload?: () => Promise<number | undefined>;
+}
+
+/**
+ * D17: cada acción manda la versión de la clínica con la que se abrió el diálogo.
+ * Ante VERSION_CONFLICT: aviso, recarga y se conserva lo escrito; guardar de nuevo usa
+ * la versión recargada.
+ */
+function useClinicVersion(
+  clinic: ClinicDetail,
+  open: boolean,
+  reload?: () => Promise<number | undefined>,
+) {
+  const [base, setBase] = useState(clinic.version);
+  const [conflict, setConflict] = useState(false);
+  useEffect(() => {
+    if (open) {
+      setBase(clinic.version);
+      setConflict(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al abrir
+  }, [open]);
+  return {
+    base,
+    conflict,
+    clear: () => setConflict(false),
+    handleError: <T extends FieldValues>(e: unknown, setError: UseFormSetError<T>) => {
+      if (!isVersionConflict(e)) {
+        applyFieldErrors(e, setError);
+        return;
+      }
+      setConflict(true);
+      void reload?.().then((v) => v !== undefined && setBase(v));
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Suspender (confirmación reforzada: escribir el slug)
 // ---------------------------------------------------------------------------
 
-export function SuspendClinicDialog({ clinic, open, onOpenChange }: DialogProps) {
+export function SuspendClinicDialog({ clinic, open, onOpenChange, reload }: DialogProps) {
   const suspend = useSuspendClinic(clinic.id);
+  const v = useClinicVersion(clinic, open, reload);
   const schema = z.object({
     reason: reasonSchema,
     confirmSlug: z.string().refine((v) => v === clinic.slug, 'El slug no coincide'),
@@ -64,17 +104,25 @@ export function SuspendClinicDialog({ clinic, open, onOpenChange }: DialogProps)
       }
       onSubmit={form.handleSubmit(({ reason }) =>
         suspend.mutate(
-          { reason },
+          { reason, version: v.base },
           {
             onSuccess: () => {
               toast.success('Clínica suspendida');
               onOpenChange(false);
             },
-            onError: (e) => applyFieldErrors(e, form.setError),
+            onError: (e) => v.handleError(e, form.setError),
           },
         ),
       )}
     >
+      {v.conflict && (
+        <ConflictBanner
+          onDiscard={() => {
+            form.reset({ reason: '', confirmSlug: '' });
+            v.clear();
+          }}
+        />
+      )}
       <Alert variant="destructive">
         <AlertTriangle />
         <AlertDescription>Todos los módulos de la clínica quedarán OFF.</AlertDescription>
@@ -110,8 +158,9 @@ export function SuspendClinicDialog({ clinic, open, onOpenChange }: DialogProps)
 
 const reasonOnlySchema = z.object({ reason: reasonSchema });
 
-export function ReactivateClinicDialog({ clinic, open, onOpenChange }: DialogProps) {
+export function ReactivateClinicDialog({ clinic, open, onOpenChange, reload }: DialogProps) {
   const reactivate = useReactivateClinic(clinic.id);
+  const v = useClinicVersion(clinic, open, reload);
   const form = useForm<z.infer<typeof reasonOnlySchema>>({
     resolver: zodResolver(reasonOnlySchema),
   });
@@ -132,15 +181,26 @@ export function ReactivateClinicDialog({ clinic, open, onOpenChange }: DialogPro
         </p>
       }
       onSubmit={form.handleSubmit((values) =>
-        reactivate.mutate(values, {
-          onSuccess: () => {
-            toast.success('Clínica reactivada');
-            onOpenChange(false);
+        reactivate.mutate(
+          { ...values, version: v.base },
+          {
+            onSuccess: () => {
+              toast.success('Clínica reactivada');
+              onOpenChange(false);
+            },
+            onError: (e) => v.handleError(e, form.setError),
           },
-          onError: (e) => applyFieldErrors(e, form.setError),
-        }),
+        ),
       )}
     >
+      {v.conflict && (
+        <ConflictBanner
+          onDiscard={() => {
+            form.reset({ reason: '' });
+            v.clear();
+          }}
+        />
+      )}
       <ReasonField form={form} />
     </ActionDialog>
   );
@@ -150,9 +210,10 @@ export function ReactivateClinicDialog({ clinic, open, onOpenChange }: DialogPro
 // Cambiar especialidad
 // ---------------------------------------------------------------------------
 
-export function ChangeSpecialtyDialog({ clinic, open, onOpenChange }: DialogProps) {
+export function ChangeSpecialtyDialog({ clinic, open, onOpenChange, reload }: DialogProps) {
   const specialties = useSpecialties();
   const change = useChangeSpecialty(clinic.id);
+  const v = useClinicVersion(clinic, open, reload);
   const schema = z.object({
     specialtyCode: z
       .string()
@@ -174,15 +235,26 @@ export function ChangeSpecialtyDialog({ clinic, open, onOpenChange }: DialogProp
       pending={change.isPending}
       description={<p>Cambia el perfil clínico de {clinic.name}.</p>}
       onSubmit={form.handleSubmit((values) =>
-        change.mutate(values, {
-          onSuccess: () => {
-            toast.success('Especialidad actualizada');
-            onOpenChange(false);
+        change.mutate(
+          { ...values, version: v.base },
+          {
+            onSuccess: () => {
+              toast.success('Especialidad actualizada');
+              onOpenChange(false);
+            },
+            onError: (e) => v.handleError(e, form.setError),
           },
-          onError: (e) => applyFieldErrors(e, form.setError),
-        }),
+        ),
       )}
     >
+      {v.conflict && (
+        <ConflictBanner
+          onDiscard={() => {
+            form.reset({ specialtyCode: '', reason: '' });
+            v.clear();
+          }}
+        />
+      )}
       <FormField
         id="specialtyCode"
         label="Nueva especialidad"
@@ -231,19 +303,21 @@ const subscriptionFormSchema = z
     message: 'Un trial necesita fecha de fin',
   });
 
-export function ChangePlanDialog({ clinic, open, onOpenChange }: DialogProps) {
+export function ChangePlanDialog({ clinic, open, onOpenChange, reload }: DialogProps) {
   const plans = usePlans();
   const change = useChangeSubscription(clinic.id);
+  const v = useClinicVersion(clinic, open, reload);
   const form = useForm<z.infer<typeof subscriptionFormSchema>>({
     resolver: zodResolver(subscriptionFormSchema),
   });
-  useResetOnOpen(form, open, {
+  const initialValues = () => ({
     planCode: clinic.subscription?.planCode ?? '',
     startsAt: toDateInput(clinic.subscription?.startsAt ?? new Date().toISOString()),
     endsAt: toDateInput(clinic.subscription?.endsAt),
     trial: clinic.subscription?.trial ?? false,
     reason: '',
   });
+  useResetOnOpen(form, open, initialValues());
   const { errors } = form.formState;
   const selectedPlan = form.watch('planCode');
 
@@ -255,25 +329,34 @@ export function ChangePlanDialog({ clinic, open, onOpenChange }: DialogProps) {
       submitLabel="Guardar suscripción"
       pending={change.isPending}
       description={<p>Cambia el plan, las fechas o el trial de {clinic.name}.</p>}
-      onSubmit={form.handleSubmit((v) =>
+      onSubmit={form.handleSubmit((values) =>
         change.mutate(
           {
-            planCode: v.planCode,
-            startsAt: fromDateInput(v.startsAt),
-            endsAt: v.endsAt ? fromDateInput(v.endsAt) : null,
-            trial: v.trial,
-            reason: v.reason,
+            planCode: values.planCode,
+            startsAt: fromDateInput(values.startsAt),
+            endsAt: values.endsAt ? fromDateInput(values.endsAt) : null,
+            trial: values.trial,
+            reason: values.reason,
+            version: v.base,
           },
           {
             onSuccess: () => {
               toast.success('Suscripción actualizada');
               onOpenChange(false);
             },
-            onError: (e) => applyFieldErrors(e, form.setError),
+            onError: (e) => v.handleError(e, form.setError),
           },
         ),
       )}
     >
+      {v.conflict && (
+        <ConflictBanner
+          onDiscard={() => {
+            form.reset(initialValues());
+            v.clear();
+          }}
+        />
+      )}
       <FormField id="planCode" label="Plan" error={errors.planCode?.message}>
         {(aria) => (
           <NativeSelect {...aria} {...form.register('planCode')} disabled={!plans.data}>
@@ -320,8 +403,9 @@ export function ChangePlanDialog({ clinic, open, onOpenChange }: DialogProps) {
 
 const renameSchema = z.object({ name: clinicNameSchema, reason: reasonSchema });
 
-export function RenameClinicDialog({ clinic, open, onOpenChange }: DialogProps) {
+export function RenameClinicDialog({ clinic, open, onOpenChange, reload }: DialogProps) {
   const update = useUpdateClinic(clinic.id);
+  const v = useClinicVersion(clinic, open, reload);
   const schema = renameSchema.refine((v) => v.name !== clinic.name, {
     path: ['name'],
     message: 'Es el nombre actual',
@@ -338,15 +422,26 @@ export function RenameClinicDialog({ clinic, open, onOpenChange }: DialogProps) 
       pending={update.isPending}
       description={<p>El slug no cambia.</p>}
       onSubmit={form.handleSubmit((values) =>
-        update.mutate(values, {
-          onSuccess: () => {
-            toast.success('Nombre actualizado');
-            onOpenChange(false);
+        update.mutate(
+          { ...values, version: v.base },
+          {
+            onSuccess: () => {
+              toast.success('Nombre actualizado');
+              onOpenChange(false);
+            },
+            onError: (e) => v.handleError(e, form.setError),
           },
-          onError: (e) => applyFieldErrors(e, form.setError),
-        }),
+        ),
       )}
     >
+      {v.conflict && (
+        <ConflictBanner
+          onDiscard={() => {
+            form.reset({ name: clinic.name, reason: '' });
+            v.clear();
+          }}
+        />
+      )}
       <FormField id="name" label="Nombre" error={form.formState.errors.name?.message}>
         {(aria) => <Input {...aria} {...form.register('name')} />}
       </FormField>

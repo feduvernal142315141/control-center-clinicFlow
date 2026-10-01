@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isoDateTime, pageSchema, reasonSchema } from './common';
+import { isoDateTime, pageSchema, reasonSchema, versionSchema } from './common';
 
 /**
  * Estado operativo de la clínica. El trial NO es un estado operativo: vive solo en la
@@ -38,6 +38,8 @@ export type Subscription = z.infer<typeof subscriptionSchema>;
 
 export const clinicDetailSchema = clinicSummarySchema.extend({
   subscription: subscriptionSchema.nullable(),
+  /** Una sola versión por clínica: datos, suscripción, especialidad, estado y overrides (D17). */
+  version: versionSchema,
 });
 export type ClinicDetail = z.infer<typeof clinicDetailSchema>;
 
@@ -89,15 +91,21 @@ export type CreateClinicInput = z.infer<typeof createClinicInputSchema>;
 export const updateClinicInputSchema = z.object({
   name: clinicNameSchema,
   reason: reasonSchema,
+  version: versionSchema,
 });
 export type UpdateClinicInput = z.infer<typeof updateClinicInputSchema>;
 
 export const reasonInputSchema = z.object({ reason: reasonSchema });
 export type ReasonInput = z.infer<typeof reasonInputSchema>;
 
+/** Suspender / reactivar (D17). */
+export const clinicStatusInputSchema = z.object({ reason: reasonSchema, version: versionSchema });
+export type ClinicStatusInput = z.infer<typeof clinicStatusInputSchema>;
+
 export const changeSpecialtyInputSchema = z.object({
   specialtyCode: z.string().min(1, 'Selecciona una especialidad'),
   reason: reasonSchema,
+  version: versionSchema,
 });
 export type ChangeSpecialtyInput = z.infer<typeof changeSpecialtyInputSchema>;
 
@@ -108,6 +116,7 @@ export const changeSubscriptionInputSchema = z
     endsAt: isoDateTime.nullable(),
     trial: z.boolean(),
     reason: reasonSchema,
+    version: versionSchema,
   })
   .refine((v) => !v.trial || v.endsAt !== null, { path: ['endsAt'], message: TRIAL_NEEDS_END });
 export type ChangeSubscriptionInput = z.infer<typeof changeSubscriptionInputSchema>;

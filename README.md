@@ -38,6 +38,17 @@ pnpm dev:mocks          # NEXT_PUBLIC_API_MOCKS=true + 2FA habilitado
 El estado de los mocks vive en memoria del servidor Next (se reinicia al reiniciar `next dev`).
 Escenarios semilla: ver `src/mocks/data.ts`.
 
+Clínicas útiles para probar:
+
+- `c-darmas`: DENTAL/PREMIUM.
+- `c-podologico-x`: DENTAL_* OFF por especialidad.
+- `c-lara`: override OFF y dependencia faltante.
+- `c-sonrisas-norte`: suspendida.
+- `c-piel-sana`: inactiva.
+- `c-vida`: activa con trial.
+- `c-trial-vencido`: trial vencido (D8).
+- `c-trial-por-vencer`: vence en 3 días.
+
 ### Contra el backend real
 
 ```bash
@@ -132,15 +143,20 @@ con `details.fields = [{field, message}]`; paginación `{content, page, size, to
 
 ### Decisiones de dominio (confirmadas)
 
-| #   | Decisión                                                                                                                                                     |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| D1  | `operationalStatus` es solo `ACTIVE \| SUSPENDED \| INACTIVE`. **El trial no es estado operativo.**                                                          |
-| D2  | El trial vive solo en la suscripción (`subscription.trial`, `subscription.status = 'TRIAL'`). Marcar o desmarcar trial **nunca** cambia `operationalStatus`. |
-| D3  | Un trial exige fecha de fin (`endsAt` en la suscripción, `trialEndsAt` al crear). Si falta → `VALIDATION_ERROR`.                                             |
-| D4  | La suscripción se asigna por `planCode`, no por `planId`.                                                                                                    |
-| D5  | "Reactivar" aplica igual a `SUSPENDED` e `INACTIVE` → `ACTIVE`, con motivo obligatorio. Solo se suspende una clínica `ACTIVE`.                               |
-| D6  | Toda acción sobre una clínica (editar nombre, plan, especialidad, suspender, reactivar) lleva `reason` y queda auditada.                                     |
-| D7  | Los módulos efectivos los calcula el backend, incluida la vista previa. El front solo compara el estado actual con la vista previa para listar qué cambia.   |
+| #   | Decisión                                                                                                                                                                                                                                       |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1  | `operationalStatus` es solo `ACTIVE \| SUSPENDED \| INACTIVE`. **El trial no es estado operativo.**                                                                                                                                            |
+| D2  | El trial vive solo en la suscripción (`subscription.trial`, `subscription.status = 'TRIAL'`). Marcar o desmarcar trial **nunca** cambia `operationalStatus`.                                                                                   |
+| D3  | Un trial exige fecha de fin (`endsAt` en la suscripción, `trialEndsAt` al crear). Si falta → `VALIDATION_ERROR`.                                                                                                                               |
+| D4  | La suscripción se asigna por `planCode`, no por `planId`.                                                                                                                                                                                      |
+| D5  | "Reactivar" aplica igual a `SUSPENDED` e `INACTIVE` → `ACTIVE`, con motivo obligatorio. Solo se suspende una clínica `ACTIVE`.                                                                                                                 |
+| D6  | Toda acción sobre una clínica (editar nombre, plan, especialidad, suspender, reactivar) lleva `reason` y queda auditada.                                                                                                                       |
+| D7  | Los módulos efectivos los calcula el backend, incluida la vista previa. El front solo compara el estado actual con la vista previa para listar qué cambia.                                                                                     |
+| D8  | Trial vencido: la suscripción pasa a `PAST_DUE` (sigue con `trial = true`) y la clínica **sigue `ACTIVE`**. Nada se suspende solo: suspender es siempre manual.                                                                                |
+| D9  | `deniedReason` es extensible: el backend puede agregar códigos nuevos (formato `MAYUSCULAS_CON_GUION`) sin romper el front, que muestra "Motivo no reconocido: CODIGO" y registra un `console.warn`. El resto del contrato se valida estricto. |
+| D10 | El `code` de planes y módulos es inmutable: `PUT` no lo recibe.                                                                                                                                                                                |
+| D11 | Un módulo `requiredCore` no se puede desactivar, dejar de ser core ni borrar (`REQUIRED_CORE_IMMUTABLE`), y siempre está ON en todos los planes.                                                                                               |
+| D12 | Dependencias faltantes dentro de un plan **no** se rechazan al guardar la matriz: el front solo advierte y en las clínicas quedan OFF por `MISSING_DEPENDENCY`.                                                                                |
 
 ### Auth
 
@@ -156,8 +172,13 @@ con `details.fields = [{field, message}]`; paginación `{content, page, size, to
 ### Dashboard
 
 - `GET /platform/dashboard` →
-  `{totalClinics, active, suspended, inactive, trial, byPlan: [{planCode|null, count}], bySpecialty: [{specialtyCode, count}]}`.
-  `active + suspended + inactive = totalClinics`; `trial` cuenta clínicas con `subscription.trial = true` (D2).
+  `{totalClinics, active, suspended, inactive, trial, byPlan: [{planCode|null, count}], bySpecialty: [{specialtyCode, count}], trials: {expired: TrialItem[], expiringSoon: TrialItem[]}}`.
+  - `active + suspended + inactive = totalClinics`.
+  - `trial` = suscripciones con `status = 'TRIAL'` (trials en curso).
+  - `TrialItem` = `{clinicId, name, slug, planCode, endsAt}`.
+  - `trials.expired`: suscripción `PAST_DUE` con `trial = true` (D8), ordenados por `endsAt`.
+  - `trials.expiringSoon`: suscripción `TRIAL` con `endsAt` entre ahora y ahora + 7 días, ordenados por `endsAt`.
+  - El backend necesita un job que pase a `PAST_DUE` los trials con `endsAt` vencido (en los mocks se aplica al vuelo).
 
 ### Clínicas
 
@@ -179,9 +200,50 @@ con `details.fields = [{field, message}]`; paginación `{content, page, size, to
 ### Módulos efectivos y vista previa
 
 - `GET /platform/clinics/{id}/effective-modules` → `EffectiveModule[]` (sección 7.3 del brief).
+  `deniedReason` admite códigos nuevos sin romper el front (D9).
 - **Vista previa:** el mismo endpoint acepta `?specialtyCode=X` y/o `?planCode=Y` y devuelve cómo quedarían
   los módulos con ese cambio, **sin guardar nada**. Mismo formato de respuesta. Código inexistente → 404.
   Lo usan los modales de cambiar especialidad y cambiar plan para listar qué pasa de ON a OFF y de OFF a ON.
+
+### Planes (BO3)
+
+- `Plan` = `{id, code, name, description?, active, sortOrder, modules: PlanModule[]}`.
+- `PlanModule` = `{moduleCode, enabled, limits?: Record<string, number | null>}`. En `limits`, la clave va en
+  camelCase, el valor es un entero ≥ 0 y `null` = ilimitado.
+- `GET /platform/plans` → `Plan[]` ordenados por `sortOrder`. `GET /platform/plans/{id}` → `Plan`.
+- `POST /platform/plans` `{code, name, description?, active, sortOrder}` → 201 `Plan`. Arranca con solo los
+  core en ON. `code`: `^[A-Z][A-Z0-9_]*$`; si está repetido → `VALIDATION_ERROR` en `code`.
+- `PUT /platform/plans/{id}` `{name, description?, active, sortOrder}` → `Plan` (sin `code`, D10).
+- `PUT /platform/plans/{id}/modules` `{modules: PlanModule[], reason}` → `Plan`. Es la matriz completa: un módulo
+  que no venga queda OFF. Un core en OFF → 409 `REQUIRED_CORE_IMMUTABLE` (D11). Las dependencias faltantes
+  no se rechazan (D12). Queda auditado con `reason`.
+
+### Módulos (BO3)
+
+- `GET /platform/modules` → `PlatformModule[]` (sección 7.2 del brief).
+- `POST /platform/modules`
+  `{code, name, description?, category, requiredCore, active, compatibleSpecialties, dependsOn}` → 201.
+  Se agrega a todos los planes (ON solo si es core). `code` repetido → `VALIDATION_ERROR` en `code`.
+- `PUT /platform/modules/{id}` → mismo body sin `code` (D10).
+  - Un core que se intente desactivar o dejar de ser core → 409 `REQUIRED_CORE_IMMUTABLE`.
+  - Un módulo que pasa a core queda ON en todos los planes.
+- `DELETE /platform/modules/{id}` con body `{reason}` → 204.
+  - Un core → 409 `REQUIRED_CORE_IMMUTABLE`.
+  - Si otros módulos dependen de él → 409 `MODULE_HAS_DEPENDENTS` con `details.dependents: string[]`.
+  - Lo quita de todos los planes.
+- Dependencias (en `POST`/`PUT`):
+  - Auto-dependencia → 409 `MODULE_DEPENDENCY_SELF` con `details.cycle: [A, A]`.
+  - Ciclo → 409 `MODULE_DEPENDENCY_CYCLE` con `details.cycle: [A, B, …, A]`.
+  - Código inexistente → 404.
+
+  El front detecta ciclos con DFS para dar feedback rápido, pero manda la validación del backend.
+
+### Especialidades (BO3)
+
+- `GET /platform/specialties` → `{code, name, active, clinicCount, compatibleModuleCount}[]`.
+  - `clinicCount`: clínicas con esa especialidad, en cualquier estado.
+  - `compatibleModuleCount`: módulos activos que la incluyen en `compatibleSpecialties` o que no tienen
+    restricción (lista vacía).
 
 ### Overrides
 
@@ -192,7 +254,7 @@ con `details.fields = [{field, message}]`; paginación `{content, page, size, to
 - [x] Setup: repo, CI, MSW, README
 - [x] BO1: login por BFF + 2FA (flag), middleware, layout, logout, errores globales, e2e
 - [x] BO2: dashboard, clínicas (lista, crear, detalle), acciones con motivo, módulos efectivos
-- [ ] BO3: planes + matriz, catálogo de módulos
+- [x] BO3: planes + matriz, catálogo de módulos con editor de dependencias, especialidades
 - [ ] BO4: overrides, auditoría
 
-Los handlers MSW de BO3–BO4 ya existen (`src/mocks/handlers.ts`).
+Los handlers MSW de BO4 ya existen (`src/mocks/handlers.ts`).

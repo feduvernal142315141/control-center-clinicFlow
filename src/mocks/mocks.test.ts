@@ -50,7 +50,9 @@ describe('datos semilla cumplen los contratos zod', () => {
     db.clinics.forEach((c) => clinicDetailSchema.parse(c));
     db.plans.forEach((p) => planSchema.parse(p));
     db.modules.forEach((m) => platformModuleSchema.parse(m));
-    db.specialties.forEach((s) => specialtySchema.parse(s));
+    db.specialties.forEach((s) =>
+      specialtySchema.parse({ ...s, clinicCount: 0, compatibleModuleCount: 0 }),
+    );
     db.auditLogs.forEach((a) => auditLogSchema.parse(a));
   });
 
@@ -144,7 +146,10 @@ describe('handlers', () => {
     const res = await call('/plans/p-basic/modules', {
       method: 'PUT',
       token,
-      body: JSON.stringify({ modules: [{ moduleCode: 'CORE_PATIENTS', enabled: false }] }),
+      body: JSON.stringify({
+        modules: [{ moduleCode: 'CORE_PATIENTS', enabled: false }],
+        reason: 'Intento de apagar un core',
+      }),
     });
     expect(res.status).toBe(409);
     expect((await res.json()).code).toBe('REQUIRED_CORE_IMMUTABLE');

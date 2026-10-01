@@ -7,12 +7,18 @@ import {
   effectiveModuleSchema,
   planSchema,
   platformMeSchema,
+  platformModuleSchema,
   specialtySchema,
   type ChangeSpecialtyInput,
   type ChangeSubscriptionInput,
   type ClinicListQuery,
   type CreateClinicInput,
   type EffectivePreviewQuery,
+  type ModuleCreateInput,
+  type ModuleUpdateInput,
+  type PlanCreateInput,
+  type PlanModulesInput,
+  type PlanUpdateInput,
   type ReasonInput,
   type UpdateClinicInput,
 } from '../schemas';
@@ -73,9 +79,45 @@ export const platformApi = {
       signal,
     }),
 
-  // ---- Catálogos ----
+  // ---- Planes ----
   listPlans: (signal?: AbortSignal) =>
     platformRequest('/plans', { schema: z.array(planSchema), signal }),
+  getPlan: (planId: string, signal?: AbortSignal) =>
+    platformRequest(`/plans/${encodeURIComponent(planId)}`, { schema: planSchema, signal }),
+  createPlan: (input: PlanCreateInput) =>
+    platformRequest('/plans', { method: 'POST', body: input, schema: planSchema }),
+  updatePlan: (planId: string, input: PlanUpdateInput) =>
+    platformRequest(`/plans/${encodeURIComponent(planId)}`, {
+      method: 'PUT',
+      body: input,
+      schema: planSchema,
+    }),
+  updatePlanModules: (planId: string, input: PlanModulesInput) =>
+    platformRequest(`/plans/${encodeURIComponent(planId)}/modules`, {
+      method: 'PUT',
+      body: input,
+      schema: planSchema,
+    }),
+
+  // ---- Módulos ----
+  listModules: (signal?: AbortSignal) =>
+    platformRequest('/modules', { schema: z.array(platformModuleSchema), signal }),
+  createModule: (input: ModuleCreateInput) =>
+    platformRequest('/modules', { method: 'POST', body: input, schema: platformModuleSchema }),
+  updateModule: (moduleId: string, input: ModuleUpdateInput) =>
+    platformRequest(`/modules/${encodeURIComponent(moduleId)}`, {
+      method: 'PUT',
+      body: input,
+      schema: platformModuleSchema,
+    }),
+  deleteModule: (moduleId: string, input: ReasonInput) =>
+    platformRequest(`/modules/${encodeURIComponent(moduleId)}`, {
+      method: 'DELETE',
+      body: input,
+      schema: undefined,
+    }),
+
+  // ---- Especialidades ----
   listSpecialties: (signal?: AbortSignal) =>
     platformRequest('/specialties', { schema: z.array(specialtySchema), signal }),
 };

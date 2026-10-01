@@ -1,14 +1,14 @@
 import type { Metadata } from 'next';
 import { PageHeader } from '@/components/layout/page-header';
-import { ComingSoon } from '@/components/states/coming-soon';
+import { SpecialtiesList } from '@/components/specialties-list';
 
 export const metadata: Metadata = { title: 'Especialidades' };
 
-export default function Page() {
+export default function SpecialtiesPage() {
   return (
     <>
       <PageHeader title="Especialidades" description="Perfiles clínicos disponibles." />
-      <ComingSoon phase="BO3" />
+      <SpecialtiesList />
     </>
   );
 }

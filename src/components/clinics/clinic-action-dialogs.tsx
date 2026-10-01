@@ -1,25 +1,15 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { AlertTriangle, Loader2 } from 'lucide-react';
-import { useEffect } from 'react';
-import { useForm, type FieldValues, type UseFormReturn } from 'react-hook-form';
+import { AlertTriangle } from 'lucide-react';
+import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
+import { ActionDialog, ReasonField, useResetOnOpen } from '@/components/shared/action-dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { FormField } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
-import { Textarea } from '@/components/ui/textarea';
 import { usePlans, useSpecialties } from '@/lib/api/hooks/use-catalogs';
 import {
   useChangeSpecialty,
@@ -40,100 +30,6 @@ interface DialogProps {
   clinic: ClinicDetail;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-// ---------------------------------------------------------------------------
-// Piezas comunes
-// ---------------------------------------------------------------------------
-
-function ReasonField<T extends FieldValues & { reason: string }>({
-  form,
-}: {
-  form: UseFormReturn<T>;
-}) {
-  const error = (form.formState.errors as { reason?: { message?: string } }).reason?.message;
-  return (
-    <FormField
-      id="reason"
-      label="Motivo (obligatorio)"
-      error={error}
-      hint="Queda registrado en la auditoría. Mínimo 10 caracteres."
-    >
-      {(aria) => (
-        <Textarea
-          {...aria}
-          rows={3}
-          {...form.register('reason' as Parameters<typeof form.register>[0])}
-        />
-      )}
-    </FormField>
-  );
-}
-
-function ActionDialog({
-  open,
-  onOpenChange,
-  title,
-  description,
-  children,
-  submitLabel,
-  pending,
-  destructive,
-  submitDisabled,
-  onSubmit,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  description: React.ReactNode;
-  children: React.ReactNode;
-  submitLabel: string;
-  pending: boolean;
-  destructive?: boolean;
-  submitDisabled?: boolean;
-  onSubmit: (e: React.FormEvent) => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={(o) => !pending && onOpenChange(o)}>
-      <DialogContent>
-        <form noValidate onSubmit={onSubmit} className="grid gap-4">
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription asChild>
-              <div>{description}</div>
-            </DialogDescription>
-          </DialogHeader>
-          {children}
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={pending}
-              onClick={() => onOpenChange(false)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="submit"
-              variant={destructive ? 'destructive' : 'default'}
-              disabled={pending || submitDisabled}
-            >
-              {pending && <Loader2 className="animate-spin" />}
-              {submitLabel}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/** Resetea el formulario cada vez que se abre el diálogo. */
-function useResetOnOpen<T extends FieldValues>(form: UseFormReturn<T>, open: boolean, values: T) {
-  useEffect(() => {
-    if (open) form.reset(values);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al abrir
-  }, [open]);
 }
 
 // ---------------------------------------------------------------------------

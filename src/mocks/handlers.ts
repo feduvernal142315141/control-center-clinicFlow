@@ -4,9 +4,11 @@ import {
   changeSpecialtyInputSchema,
   changeSubscriptionInputSchema,
   createClinicInputSchema,
-  moduleInputSchema,
+  moduleCreateInputSchema,
+  moduleUpdateInputSchema,
   moduleOverrideInputSchema,
-  planInputSchema,
+  planCreateInputSchema,
+  planUpdateInputSchema,
   planModulesInputSchema,
   reasonInputSchema,
   updateClinicInputSchema,
@@ -164,6 +166,24 @@ function trialLists(db: MockDb, now = Date.now()) {
       .map(item)
       .sort(byEnd),
   };
+}
+
+/** MODULE_DEPENDENCY_SELF / desconocida / MODULE_DEPENDENCY_CYCLE, o null si es válido. */
+function validateDependencies(db: MockDb, code: string, dependsOn: string[]) {
+  if (dependsOn.includes(code)) {
+    return err(409, 'MODULE_DEPENDENCY_SELF', 'Un módulo no puede depender de sí mismo.', {
+      cycle: [code, code],
+    });
+  }
+  const unknown = dependsOn.filter((d) => !db.modules.some((m) => m.code === d));
+  if (unknown.length) return notFound(`Dependencia ${unknown.join(', ')}`);
+  const cycle = findDependencyCycle(db, code, dependsOn);
+  if (cycle) {
+    return err(409, 'MODULE_DEPENDENCY_CYCLE', `Ciclo de dependencias: ${cycle.join(' → ')}`, {
+      cycle,
+    });
+  }
+  return null;
 }
 
 function findClinic(db: MockDb, id: string) {
@@ -563,7 +583,7 @@ export function createPlatformHandlers(
     http.post(
       u('/plans'),
       authed(async ({ db, user, request }) => {
-        const body = await parseBody(request, planInputSchema);
+        const body = await parseBody(request, planCreateInputSchema);
         if ('response' in body) return body.response;
         if (db.plans.some((p) => p.code === body.data.code)) {
           return err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
@@ -573,6 +593,7 @@ export function createPlatformHandlers(
         const plan = {
           ...body.data,
           id: nextId(db, 'p'),
+          // Un plan nuevo arranca solo con los core.
           modules: db.modules.map((m) => ({ moduleCode: m.code, enabled: m.requiredCore })),
         };
         db.plans.push(plan);
@@ -601,7 +622,8 @@ export function createPlatformHandlers(
       authed(async ({ db, user, request, params }) => {
         const plan = db.plans.find((p) => p.id === params.planId);
         if (!plan) return notFound('Plan');
-        const body = await parseBody(request, planInputSchema);
+        // El code no viene en el body: no se puede editar.
+        const body = await parseBody(request, planUpdateInputSchema);
         if ('response' in body) return body.response;
         const before = structuredClone(plan);
         Object.assign(plan, body.data);
@@ -650,18 +672,31 @@ export function createPlatformHandlers(
         const body = await parseBody(request, planModulesInputSchema);
         if ('response' in body) return body.response;
         for (const pm of body.data.modules) {
-          const m = db.modules.find((x) => x.code === pm.moduleCode);
-          if (!m) return notFound(`Módulo ${pm.moduleCode}`);
-          if (m.requiredCore && !pm.enabled) {
-            return err(
-              409,
-              'REQUIRED_CORE_IMMUTABLE',
-              `${m.code} es core obligatorio: no se puede apagar.`,
-            );
+          if (!db.modules.some((x) => x.code === pm.moduleCode)) {
+            return notFound(`Módulo ${pm.moduleCode}`);
           }
         }
+        // Matriz completa: lo que no venga queda OFF; un core nunca puede quedar OFF.
+        const next = db.modules.map(
+          (m) =>
+            body.data.modules.find((pm) => pm.moduleCode === m.code) ?? {
+              moduleCode: m.code,
+              enabled: false,
+            },
+        );
+        const coreOff = next.find(
+          (pm) => !pm.enabled && db.modules.find((m) => m.code === pm.moduleCode)!.requiredCore,
+        );
+        if (coreOff) {
+          return err(
+            409,
+            'REQUIRED_CORE_IMMUTABLE',
+            `${coreOff.moduleCode} es core obligatorio: no se puede apagar.`,
+          );
+        }
+        // Las dependencias faltantes NO se rechazan: se resuelven en módulos efectivos.
         const before = plan.modules;
-        plan.modules = body.data.modules;
+        plan.modules = next;
         audit(db, request, user, {
           action: 'PLAN_MODULES_UPDATED',
           clinicId: null,
@@ -669,6 +704,7 @@ export function createPlatformHandlers(
           entityId: plan.id,
           before,
           after: plan.modules,
+          reason: body.data.reason,
         });
         return HttpResponse.json(plan);
       }),
@@ -688,76 +724,99 @@ export function createPlatformHandlers(
       }),
     ),
 
-    ...(['post', 'put'] as const).map((method) =>
-      http[method](
-        u(method === 'post' ? '/modules' : '/modules/:moduleId'),
-        authed(async ({ db, user, request, params }) => {
-          const existing =
-            method === 'put' ? db.modules.find((x) => x.id === params.moduleId) : undefined;
-          if (method === 'put' && !existing) return notFound('Módulo');
-          const body = await parseBody(request, moduleInputSchema);
-          if ('response' in body) return body.response;
-          const input = body.data;
-          if (method === 'post' && db.modules.some((m) => m.code === input.code)) {
-            return err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
-              fields: [{ field: 'code', message: 'Ese código ya existe' }],
-            });
-          }
-          if (existing?.requiredCore && (!input.active || !input.requiredCore)) {
-            return err(409, 'REQUIRED_CORE_IMMUTABLE', 'Un módulo core no se puede desactivar.');
-          }
-          if (input.dependsOn.includes(input.code)) {
-            return err(409, 'MODULE_DEPENDENCY_SELF', 'Un módulo no puede depender de sí mismo.');
-          }
-          const unknown = input.dependsOn.filter((d) => !db.modules.some((m) => m.code === d));
-          if (unknown.length) return notFound(`Dependencia ${unknown.join(', ')}`);
-          const cycle = findDependencyCycle(db, input.code, input.dependsOn);
-          if (cycle) {
-            return err(
-              409,
-              'MODULE_DEPENDENCY_CYCLE',
-              `Ciclo de dependencias: ${cycle.join(' → ')}`,
-              {
-                cycle,
-              },
-            );
-          }
-          const before = existing ? structuredClone(existing) : null;
-          const saved = { ...existing, ...input, id: existing?.id ?? nextId(db, 'm') };
-          if (existing) Object.assign(existing, saved);
-          else {
-            db.modules.push(saved);
-            for (const plan of db.plans)
-              plan.modules.push({ moduleCode: saved.code, enabled: saved.requiredCore });
-          }
-          audit(db, request, user, {
-            action: existing ? 'MODULE_UPDATED' : 'MODULE_CREATED',
-            clinicId: null,
-            entityType: 'Module',
-            entityId: saved.id,
-            before,
-            after: saved,
+    http.post(
+      u('/modules'),
+      authed(async ({ db, user, request }) => {
+        const body = await parseBody(request, moduleCreateInputSchema);
+        if ('response' in body) return body.response;
+        const input = body.data;
+        if (db.modules.some((m) => m.code === input.code)) {
+          return err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
+            fields: [{ field: 'code', message: 'Ese código ya existe' }],
           });
-          return HttpResponse.json(saved, { status: existing ? 200 : 201 });
-        }),
-      ),
+        }
+        const invalid = validateDependencies(db, input.code, input.dependsOn);
+        if (invalid) return invalid;
+        const saved = { ...input, id: nextId(db, 'm') };
+        db.modules.push(saved);
+        for (const plan of db.plans)
+          plan.modules.push({ moduleCode: saved.code, enabled: saved.requiredCore });
+        audit(db, request, user, {
+          action: 'MODULE_CREATED',
+          clinicId: null,
+          entityType: 'Module',
+          entityId: saved.id,
+          before: null,
+          after: saved,
+        });
+        return HttpResponse.json(saved, { status: 201 });
+      }),
+    ),
+
+    http.put(
+      u('/modules/:moduleId'),
+      authed(async ({ db, user, request, params }) => {
+        const existing = db.modules.find((x) => x.id === params.moduleId);
+        if (!existing) return notFound('Módulo');
+        // El code no viene en el body: no se puede editar.
+        const body = await parseBody(request, moduleUpdateInputSchema);
+        if ('response' in body) return body.response;
+        const input = body.data;
+        if (existing.requiredCore && (!input.active || !input.requiredCore)) {
+          return err(
+            409,
+            'REQUIRED_CORE_IMMUTABLE',
+            'Un módulo core obligatorio no se puede desactivar ni dejar de ser core.',
+          );
+        }
+        const invalid = validateDependencies(db, existing.code, input.dependsOn);
+        if (invalid) return invalid;
+        const before = structuredClone(existing);
+        Object.assign(existing, input);
+        if (!input.description) delete existing.description;
+        // Un módulo que pasa a core queda ON en todos los planes.
+        if (existing.requiredCore) {
+          for (const plan of db.plans) {
+            const pm = plan.modules.find((x) => x.moduleCode === existing.code);
+            if (pm) pm.enabled = true;
+          }
+        }
+        audit(db, request, user, {
+          action: 'MODULE_UPDATED',
+          clinicId: null,
+          entityType: 'Module',
+          entityId: existing.id,
+          before,
+          after: existing,
+        });
+        return HttpResponse.json(existing);
+      }),
     ),
 
     http.delete(
       u('/modules/:moduleId'),
-      authed(({ db, user, request, params }) => {
+      authed(async ({ db, user, request, params }) => {
         const m = db.modules.find((x) => x.id === params.moduleId);
         if (!m) return notFound('Módulo');
+        const body = await parseBody(request, reasonInputSchema);
+        if ('response' in body) return body.response;
         if (m.requiredCore) {
-          return err(409, 'REQUIRED_CORE_IMMUTABLE', 'Un módulo core no se puede borrar.');
+          return err(
+            409,
+            'REQUIRED_CORE_IMMUTABLE',
+            'Un módulo core obligatorio no se puede borrar.',
+          );
         }
         const dependents = db.modules
           .filter((x) => x.dependsOn.includes(m.code))
           .map((x) => x.code);
         if (dependents.length) {
-          return err(409, 'MODULE_HAS_DEPENDENTS', `Otros módulos dependen de ${m.code}.`, {
-            dependents,
-          });
+          return err(
+            409,
+            'MODULE_HAS_DEPENDENTS',
+            `No se puede borrar: ${dependents.join(', ')} depende(n) de ${m.code}.`,
+            { dependents },
+          );
         }
         db.modules = db.modules.filter((x) => x.id !== m.id);
         for (const plan of db.plans)
@@ -769,6 +828,7 @@ export function createPlatformHandlers(
           entityId: m.id,
           before: m,
           after: null,
+          reason: body.data.reason,
         });
         return new HttpResponse(null, { status: 204 });
       }),
@@ -777,7 +837,19 @@ export function createPlatformHandlers(
     // ---- Especialidades ----
     http.get(
       u('/specialties'),
-      authed(({ db }) => HttpResponse.json(db.specialties)),
+      authed(({ db }) =>
+        HttpResponse.json(
+          db.specialties.map((s) => ({
+            ...s,
+            clinicCount: db.clinics.filter((c) => c.specialtyCode === s.code).length,
+            compatibleModuleCount: db.modules.filter(
+              (m) =>
+                m.active &&
+                (m.compatibleSpecialties.length === 0 || m.compatibleSpecialties.includes(s.code)),
+            ).length,
+          })),
+        ),
+      ),
     ),
 
     // ---- Auditoría ----

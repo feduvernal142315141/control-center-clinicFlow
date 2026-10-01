@@ -13,6 +13,8 @@ export const queryKeys = {
       ['platform', 'clinics', 'detail', clinicId, 'effective-modules', 'preview', preview] as const,
   },
   plans: ['platform', 'plans'] as const,
+  plan: (planId: string) => ['platform', 'plans', planId] as const,
+  modules: ['platform', 'modules'] as const,
   specialties: ['platform', 'specialties'] as const,
   auditLogs: ['platform', 'audit-logs'] as const,
 };

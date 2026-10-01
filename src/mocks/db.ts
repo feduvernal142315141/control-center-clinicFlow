@@ -4,7 +4,6 @@ import type {
   ModuleOverride,
   Plan,
   PlatformModule,
-  Specialty,
 } from '@/lib/api/schemas';
 import {
   seedAuditLogs,
@@ -16,11 +15,12 @@ import {
   seedSpecialties,
   seedUsers,
   type MockUser,
+  type SpecialtyRow,
 } from './data';
 
 export interface MockDb {
   users: MockUser[];
-  specialties: Specialty[];
+  specialties: SpecialtyRow[];
   modules: PlatformModule[];
   plans: Plan[];
   clinics: ClinicDetail[];

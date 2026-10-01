@@ -59,7 +59,10 @@ export const seedUsers: MockUser[] = [
   },
 ];
 
-export const seedSpecialties: Specialty[] = [
+/** Las cuentas (clínicas, módulos) las calcula el handler. */
+export type SpecialtyRow = Omit<Specialty, 'clinicCount' | 'compatibleModuleCount'>;
+
+export const seedSpecialties: SpecialtyRow[] = [
   { code: 'DENTAL', name: 'Odontología', active: true },
   { code: 'PODIATRY', name: 'Podología', active: true },
   { code: 'GENERAL', name: 'Medicina general', active: true },

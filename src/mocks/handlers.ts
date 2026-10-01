@@ -1,0 +1,735 @@
+import { http, HttpResponse, type RequestHandler } from 'msw';
+import type { z } from 'zod';
+import {
+  changeSpecialtyInputSchema,
+  changeSubscriptionInputSchema,
+  createClinicInputSchema,
+  moduleInputSchema,
+  moduleOverrideInputSchema,
+  planInputSchema,
+  planModulesInputSchema,
+  reasonInputSchema,
+  updateClinicInputSchema,
+  type AuditLog,
+  type ClinicDetail,
+  type Dashboard,
+  type ModuleOverride,
+  type Page,
+  type PlatformMe,
+} from '@/lib/api/schemas';
+import { MOCK_TOTP_CODE, type MockUser } from './data';
+import { getDb, nextId, type MockDb } from './db';
+import { findDependencyCycle, resolveEffectiveModules } from './effective';
+
+const ACCESS_TTL_SECONDS = Number(process.env.MOCK_ACCESS_TTL_SECONDS ?? 15 * 60);
+const REFRESH_TTL_SECONDS = 8 * 60 * 60;
+const MAX_FAILED_LOGINS = 5;
+
+// ---------------------------------------------------------------------------
+// Utilidades
+// ---------------------------------------------------------------------------
+
+const err = (status: number, code: string, message: string, details?: unknown) =>
+  HttpResponse.json({ code, message, ...(details !== undefined ? { details } : {}) }, { status });
+
+const notFound = (what: string) => err(404, 'NOT_FOUND', `${what} no encontrado.`);
+
+const token = (prefix: string) => `${prefix}.${crypto.randomUUID()}`;
+
+function issueTokens(db: MockDb, userId: string) {
+  const accessToken = token('mock-at');
+  const refreshToken = token('mock-rt');
+  db.accessTokens.set(accessToken, { userId, expiresAt: Date.now() + ACCESS_TTL_SECONDS * 1000 });
+  db.refreshTokens.set(refreshToken, userId);
+  return {
+    accessToken,
+    refreshToken,
+    expiresIn: ACCESS_TTL_SECONDS,
+    refreshExpiresIn: REFRESH_TTL_SECONDS,
+  };
+}
+
+function currentUser(db: MockDb, request: Request): MockUser | null {
+  const auth = request.headers.get('authorization');
+  const bearer = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+  const session = bearer ? db.accessTokens.get(bearer) : undefined;
+  if (!session || session.expiresAt < Date.now()) return null;
+  return db.users.find((u) => u.id === session.userId) ?? null;
+}
+
+async function parseBody<S extends z.ZodType>(
+  request: Request,
+  schema: S,
+): Promise<{ data: z.infer<S> } | { response: Response }> {
+  const json = await request.json().catch(() => undefined);
+  const parsed = schema.safeParse(json);
+  if (parsed.success) return { data: parsed.data };
+  return {
+    response: err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
+      fields: parsed.error.issues.map((i) => ({
+        field: i.path.map(String).join('.'),
+        message: i.message,
+      })),
+    }),
+  };
+}
+
+function audit(
+  db: MockDb,
+  request: Request,
+  user: MockUser,
+  entry: Pick<AuditLog, 'action' | 'clinicId' | 'entityType' | 'entityId' | 'before' | 'after'> & {
+    reason?: string | null;
+  },
+) {
+  db.auditLogs.unshift({
+    id: nextId(db, 'a'),
+    actor: { id: user.id, email: user.email },
+    reason: entry.reason ?? null,
+    ip: request.headers.get('x-forwarded-for') ?? '127.0.0.1',
+    createdAt: new Date().toISOString(),
+    ...entry,
+  });
+}
+
+function paginate<T>(items: T[], url: URL): Page<T> {
+  const page = Math.max(0, Number(url.searchParams.get('page') ?? 0) || 0);
+  const size = Math.min(100, Math.max(1, Number(url.searchParams.get('size') ?? 20) || 20));
+  return {
+    content: items.slice(page * size, page * size + size),
+    page,
+    size,
+    totalElements: items.length,
+    totalPages: Math.ceil(items.length / size),
+  };
+}
+
+const summary = ({ subscription: _s, ...c }: ClinicDetail) => c;
+
+type Ctx = { db: MockDb; user: MockUser; request: Request; params: Record<string, string> };
+
+/** Envuelve un resolver que exige sesión de plataforma. */
+function authed(resolver: (ctx: Ctx) => Response | Promise<Response>) {
+  return ({ request, params }: { request: Request; params: Record<string, unknown> }) => {
+    const db = getDb();
+    const user = currentUser(db, request);
+    if (!user) return err(401, 'UNAUTHENTICATED', 'Token inválido o expirado.');
+    return resolver({ db, user, request, params: params as Record<string, string> });
+  };
+}
+
+function findClinic(db: MockDb, id: string) {
+  return db.clinics.find((c) => c.id === id);
+}
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
+export function createPlatformHandlers(baseUrl: string): RequestHandler[] {
+  const u = (path: string) => `${baseUrl}/platform${path}`;
+
+  return [
+    // ---- Auth ----
+    http.post(u('/auth/login'), async ({ request }) => {
+      const db = getDb();
+      const body = (await request.json().catch(() => ({}))) as {
+        email?: string;
+        password?: string;
+      };
+      const email = String(body.email ?? '').toLowerCase();
+      const failed = db.failedLogins.get(email) ?? 0;
+      if (failed >= MAX_FAILED_LOGINS) {
+        return err(429, 'RATE_LIMITED', 'Demasiados intentos. Intenta de nuevo en 15 minutos.');
+      }
+      const user = db.users.find((x) => x.email === email);
+      if (!user || user.password !== body.password) {
+        db.failedLogins.set(email, failed + 1);
+        return err(401, 'INVALID_CREDENTIALS', 'Correo o contraseña incorrectos.');
+      }
+      if (user.locked) {
+        return err(423, 'ACCOUNT_LOCKED', 'La cuenta está bloqueada. Contacta a un administrador.');
+      }
+      db.failedLogins.delete(email);
+      if (user.mfa) {
+        const mfaToken = token('mock-mfa');
+        db.mfaTokens.set(mfaToken, { userId: user.id, expiresAt: Date.now() + 5 * 60 * 1000 });
+        return HttpResponse.json({ mfaRequired: true, mfaToken });
+      }
+      return HttpResponse.json(issueTokens(db, user.id));
+    }),
+
+    http.post(u('/auth/mfa/verify'), async ({ request }) => {
+      const db = getDb();
+      const body = (await request.json().catch(() => ({}))) as { mfaToken?: string; code?: string };
+      const challenge = body.mfaToken ? db.mfaTokens.get(body.mfaToken) : undefined;
+      if (!challenge || challenge.expiresAt < Date.now()) {
+        return err(401, 'MFA_SESSION_EXPIRED', 'La verificación expiró. Inicia sesión de nuevo.');
+      }
+      if (body.code !== MOCK_TOTP_CODE) {
+        return err(401, 'INVALID_MFA_CODE', 'Código incorrecto.');
+      }
+      db.mfaTokens.delete(body.mfaToken!);
+      return HttpResponse.json(issueTokens(db, challenge.userId));
+    }),
+
+    http.post(u('/auth/refresh'), async ({ request }) => {
+      const db = getDb();
+      const body = (await request.json().catch(() => ({}))) as { refreshToken?: string };
+      const userId = body.refreshToken ? db.refreshTokens.get(body.refreshToken) : undefined;
+      if (!userId) return err(401, 'UNAUTHENTICATED', 'Refresh token inválido.');
+      db.refreshTokens.delete(body.refreshToken!); // rotación
+      return HttpResponse.json(issueTokens(db, userId));
+    }),
+
+    http.post(u('/auth/logout'), async ({ request }) => {
+      const db = getDb();
+      const body = (await request.json().catch(() => ({}))) as { refreshToken?: string };
+      if (body.refreshToken) db.refreshTokens.delete(body.refreshToken);
+      const auth = request.headers.get('authorization');
+      if (auth?.startsWith('Bearer ')) db.accessTokens.delete(auth.slice(7));
+      return new HttpResponse(null, { status: 204 });
+    }),
+
+    // ---- Me / dashboard ----
+    http.get(
+      u('/me'),
+      authed(({ user }) =>
+        HttpResponse.json<PlatformMe>({
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          roles: ['SUPER_ADMIN'],
+          mfaEnabled: user.mfa,
+        }),
+      ),
+    ),
+
+    http.get(
+      u('/dashboard'),
+      authed(({ db }) => {
+        const by = <K extends string>(key: (c: ClinicDetail) => K) => {
+          const counts = new Map<K, number>();
+          for (const c of db.clinics) counts.set(key(c), (counts.get(key(c)) ?? 0) + 1);
+          return [...counts];
+        };
+        const status = (s: ClinicDetail['operationalStatus']) =>
+          db.clinics.filter((c) => c.operationalStatus === s).length;
+        return HttpResponse.json<Dashboard>({
+          totalClinics: db.clinics.length,
+          active: status('ACTIVE'),
+          trial: status('TRIAL'),
+          suspended: status('SUSPENDED'),
+          inactive: status('INACTIVE'),
+          byPlan: by((c) => c.planCode ?? '__NONE__').map(([planCode, count]) => ({
+            planCode: planCode === '__NONE__' ? null : planCode,
+            count,
+          })),
+          bySpecialty: by((c) => c.specialtyCode).map(([specialtyCode, count]) => ({
+            specialtyCode,
+            count,
+          })),
+        });
+      }),
+    ),
+
+    // ---- Clínicas ----
+    http.get(
+      u('/clinics'),
+      authed(({ db, request }) => {
+        const url = new URL(request.url);
+        const q = url.searchParams.get('q')?.toLowerCase().trim();
+        const status = url.searchParams.get('status');
+        const planCode = url.searchParams.get('planCode');
+        const specialtyCode = url.searchParams.get('specialtyCode');
+        const items = db.clinics
+          .filter(
+            (c) =>
+              (!q || c.name.toLowerCase().includes(q) || c.slug.includes(q)) &&
+              (!status || c.operationalStatus === status) &&
+              (!planCode || c.planCode === planCode) &&
+              (!specialtyCode || c.specialtyCode === specialtyCode),
+          )
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .map(summary);
+        return HttpResponse.json(paginate(items, url));
+      }),
+    ),
+
+    http.post(
+      u('/clinics'),
+      authed(async ({ db, user, request }) => {
+        const body = await parseBody(request, createClinicInputSchema);
+        if ('response' in body) return body.response;
+        const input = body.data;
+        if (db.clinics.some((c) => c.slug === input.slug)) {
+          return err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
+            fields: [{ field: 'slug', message: 'Ese slug ya está en uso' }],
+          });
+        }
+        const plan = db.plans.find((p) => p.code === input.planCode);
+        if (!plan) return notFound('Plan');
+        if (!db.specialties.some((s) => s.code === input.specialtyCode))
+          return notFound('Especialidad');
+        const now = new Date().toISOString();
+        const id = nextId(db, 'c');
+        const clinic: ClinicDetail = {
+          id,
+          name: input.name,
+          slug: input.slug,
+          specialtyCode: input.specialtyCode,
+          operationalStatus: input.trial ? 'TRIAL' : 'ACTIVE',
+          planCode: plan.code,
+          createdAt: now,
+          subscription: {
+            id: nextId(db, 's'),
+            planId: plan.id,
+            planCode: plan.code,
+            status: input.trial ? 'TRIAL' : 'ACTIVE',
+            startsAt: now,
+            endsAt: input.trial ? new Date(Date.now() + 30 * 86_400_000).toISOString() : null,
+            renewalDate: input.trial ? null : new Date(Date.now() + 30 * 86_400_000).toISOString(),
+            trial: input.trial,
+          },
+        };
+        db.clinics.push(clinic);
+        audit(db, request, user, {
+          action: 'CLINIC_CREATED',
+          clinicId: id,
+          entityType: 'Clinic',
+          entityId: id,
+          before: null,
+          after: { ...clinic, admin: input.admin },
+        });
+        return HttpResponse.json(clinic, { status: 201 });
+      }),
+    ),
+
+    http.get(
+      u('/clinics/:clinicId'),
+      authed(({ db, params }) => {
+        const clinic = findClinic(db, params.clinicId);
+        return clinic ? HttpResponse.json(clinic) : notFound('Clínica');
+      }),
+    ),
+
+    http.patch(
+      u('/clinics/:clinicId'),
+      authed(async ({ db, user, request, params }) => {
+        const clinic = findClinic(db, params.clinicId);
+        if (!clinic) return notFound('Clínica');
+        const body = await parseBody(request, updateClinicInputSchema);
+        if ('response' in body) return body.response;
+        const before = { name: clinic.name };
+        Object.assign(clinic, body.data);
+        audit(db, request, user, {
+          action: 'CLINIC_UPDATED',
+          clinicId: clinic.id,
+          entityType: 'Clinic',
+          entityId: clinic.id,
+          before,
+          after: { name: clinic.name },
+        });
+        return HttpResponse.json(clinic);
+      }),
+    ),
+
+    ...(['suspend', 'reactivate'] as const).map((action) =>
+      http.post(
+        u(`/clinics/:clinicId/${action}`),
+        authed(async ({ db, user, request, params }) => {
+          const clinic = findClinic(db, params.clinicId);
+          if (!clinic) return notFound('Clínica');
+          const body = await parseBody(request, reasonInputSchema);
+          if ('response' in body) return body.response;
+          const target =
+            action === 'suspend' ? 'SUSPENDED' : clinic.subscription?.trial ? 'TRIAL' : 'ACTIVE';
+          if (action === 'suspend' && clinic.operationalStatus === 'SUSPENDED') {
+            return err(409, 'CLINIC_ALREADY_SUSPENDED', 'La clínica ya está suspendida.');
+          }
+          if (action === 'reactivate' && clinic.operationalStatus !== 'SUSPENDED') {
+            return err(409, 'CLINIC_NOT_SUSPENDED', 'La clínica no está suspendida.');
+          }
+          const before = { operationalStatus: clinic.operationalStatus };
+          clinic.operationalStatus = target;
+          audit(db, request, user, {
+            action: action === 'suspend' ? 'CLINIC_SUSPENDED' : 'CLINIC_REACTIVATED',
+            clinicId: clinic.id,
+            entityType: 'Clinic',
+            entityId: clinic.id,
+            before,
+            after: { operationalStatus: target },
+            reason: body.data.reason,
+          });
+          return HttpResponse.json(clinic);
+        }),
+      ),
+    ),
+
+    http.put(
+      u('/clinics/:clinicId/subscription'),
+      authed(async ({ db, user, request, params }) => {
+        const clinic = findClinic(db, params.clinicId);
+        if (!clinic) return notFound('Clínica');
+        const body = await parseBody(request, changeSubscriptionInputSchema);
+        if ('response' in body) return body.response;
+        const plan = db.plans.find((p) => p.code === body.data.planCode);
+        if (!plan) return notFound('Plan');
+        const before = clinic.subscription;
+        clinic.planCode = plan.code;
+        clinic.subscription = {
+          id: clinic.subscription?.id ?? nextId(db, 's'),
+          planId: plan.id,
+          planCode: plan.code,
+          status: body.data.trial ? 'TRIAL' : 'ACTIVE',
+          startsAt: body.data.startsAt,
+          endsAt: body.data.endsAt,
+          renewalDate: body.data.trial ? null : body.data.endsAt,
+          trial: body.data.trial,
+        };
+        audit(db, request, user, {
+          action: 'SUBSCRIPTION_CHANGED',
+          clinicId: clinic.id,
+          entityType: 'Subscription',
+          entityId: clinic.subscription.id,
+          before,
+          after: clinic.subscription,
+          reason: body.data.reason,
+        });
+        return HttpResponse.json(clinic);
+      }),
+    ),
+
+    http.put(
+      u('/clinics/:clinicId/specialty'),
+      authed(async ({ db, user, request, params }) => {
+        const clinic = findClinic(db, params.clinicId);
+        if (!clinic) return notFound('Clínica');
+        const body = await parseBody(request, changeSpecialtyInputSchema);
+        if ('response' in body) return body.response;
+        if (!db.specialties.some((s) => s.code === body.data.specialtyCode && s.active)) {
+          return notFound('Especialidad');
+        }
+        const before = { specialtyCode: clinic.specialtyCode };
+        clinic.specialtyCode = body.data.specialtyCode;
+        audit(db, request, user, {
+          action: 'SPECIALTY_CHANGED',
+          clinicId: clinic.id,
+          entityType: 'Clinic',
+          entityId: clinic.id,
+          before,
+          after: { specialtyCode: clinic.specialtyCode },
+          reason: body.data.reason,
+        });
+        return HttpResponse.json(clinic);
+      }),
+    ),
+
+    http.get(
+      u('/clinics/:clinicId/effective-modules'),
+      authed(({ db, params }) => {
+        const rows = resolveEffectiveModules(db, params.clinicId);
+        return rows ? HttpResponse.json(rows) : notFound('Clínica');
+      }),
+    ),
+
+    http.get(
+      u('/clinics/:clinicId/module-overrides'),
+      authed(({ db, params }) =>
+        findClinic(db, params.clinicId)
+          ? HttpResponse.json(db.overrides[params.clinicId] ?? [])
+          : notFound('Clínica'),
+      ),
+    ),
+
+    http.put(
+      u('/clinics/:clinicId/module-overrides'),
+      authed(async ({ db, user, request, params }) => {
+        if (!findClinic(db, params.clinicId)) return notFound('Clínica');
+        const body = await parseBody(request, moduleOverrideInputSchema.array());
+        if ('response' in body) return body.response;
+        for (const o of body.data) {
+          const m = db.modules.find((x) => x.code === o.moduleCode);
+          if (!m) return notFound(`Módulo ${o.moduleCode}`);
+          if (m.requiredCore && !o.enabled) {
+            return err(
+              409,
+              'REQUIRED_CORE_IMMUTABLE',
+              `${m.code} es core obligatorio: no se puede apagar.`,
+            );
+          }
+        }
+        const before = db.overrides[params.clinicId] ?? [];
+        const now = new Date().toISOString();
+        const next: ModuleOverride[] = body.data.map((o) => {
+          const prev = before.find((p) => p.moduleCode === o.moduleCode);
+          const unchanged =
+            prev &&
+            prev.enabled === o.enabled &&
+            prev.reason === o.reason &&
+            prev.expiresAt === o.expiresAt;
+          return unchanged ? prev : { ...o, createdBy: user.email, createdAt: now };
+        });
+        db.overrides[params.clinicId] = next;
+        audit(db, request, user, {
+          action: 'MODULE_OVERRIDES_UPDATED',
+          clinicId: params.clinicId,
+          entityType: 'ModuleOverride',
+          entityId: params.clinicId,
+          before,
+          after: next,
+          reason: body.data.map((o) => o.reason).join(' | ') || null,
+        });
+        return HttpResponse.json(next);
+      }),
+    ),
+
+    // ---- Planes ----
+    http.get(
+      u('/plans'),
+      authed(({ db }) =>
+        HttpResponse.json([...db.plans].sort((a, b) => a.sortOrder - b.sortOrder)),
+      ),
+    ),
+
+    http.post(
+      u('/plans'),
+      authed(async ({ db, user, request }) => {
+        const body = await parseBody(request, planInputSchema);
+        if ('response' in body) return body.response;
+        if (db.plans.some((p) => p.code === body.data.code)) {
+          return err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
+            fields: [{ field: 'code', message: 'Ese código ya existe' }],
+          });
+        }
+        const plan = {
+          ...body.data,
+          id: nextId(db, 'p'),
+          modules: db.modules.map((m) => ({ moduleCode: m.code, enabled: m.requiredCore })),
+        };
+        db.plans.push(plan);
+        audit(db, request, user, {
+          action: 'PLAN_CREATED',
+          clinicId: null,
+          entityType: 'Plan',
+          entityId: plan.id,
+          before: null,
+          after: plan,
+        });
+        return HttpResponse.json(plan, { status: 201 });
+      }),
+    ),
+
+    http.get(
+      u('/plans/:planId'),
+      authed(({ db, params }) => {
+        const plan = db.plans.find((p) => p.id === params.planId);
+        return plan ? HttpResponse.json(plan) : notFound('Plan');
+      }),
+    ),
+
+    http.put(
+      u('/plans/:planId'),
+      authed(async ({ db, user, request, params }) => {
+        const plan = db.plans.find((p) => p.id === params.planId);
+        if (!plan) return notFound('Plan');
+        const body = await parseBody(request, planInputSchema);
+        if ('response' in body) return body.response;
+        const before = structuredClone(plan);
+        Object.assign(plan, body.data);
+        audit(db, request, user, {
+          action: 'PLAN_UPDATED',
+          clinicId: null,
+          entityType: 'Plan',
+          entityId: plan.id,
+          before,
+          after: plan,
+        });
+        return HttpResponse.json(plan);
+      }),
+    ),
+
+    http.delete(
+      u('/plans/:planId'),
+      authed(({ db, user, request, params }) => {
+        const plan = db.plans.find((p) => p.id === params.planId);
+        if (!plan) return notFound('Plan');
+        if (db.clinics.some((c) => c.planCode === plan.code)) {
+          return err(
+            409,
+            'PLAN_IN_USE',
+            'El plan tiene clínicas asignadas; desactívalo en su lugar.',
+          );
+        }
+        db.plans = db.plans.filter((p) => p.id !== plan.id);
+        audit(db, request, user, {
+          action: 'PLAN_DELETED',
+          clinicId: null,
+          entityType: 'Plan',
+          entityId: plan.id,
+          before: plan,
+          after: null,
+        });
+        return new HttpResponse(null, { status: 204 });
+      }),
+    ),
+
+    http.put(
+      u('/plans/:planId/modules'),
+      authed(async ({ db, user, request, params }) => {
+        const plan = db.plans.find((p) => p.id === params.planId);
+        if (!plan) return notFound('Plan');
+        const body = await parseBody(request, planModulesInputSchema);
+        if ('response' in body) return body.response;
+        for (const pm of body.data.modules) {
+          const m = db.modules.find((x) => x.code === pm.moduleCode);
+          if (!m) return notFound(`Módulo ${pm.moduleCode}`);
+          if (m.requiredCore && !pm.enabled) {
+            return err(
+              409,
+              'REQUIRED_CORE_IMMUTABLE',
+              `${m.code} es core obligatorio: no se puede apagar.`,
+            );
+          }
+        }
+        const before = plan.modules;
+        plan.modules = body.data.modules;
+        audit(db, request, user, {
+          action: 'PLAN_MODULES_UPDATED',
+          clinicId: null,
+          entityType: 'Plan',
+          entityId: plan.id,
+          before,
+          after: plan.modules,
+        });
+        return HttpResponse.json(plan);
+      }),
+    ),
+
+    // ---- Módulos ----
+    http.get(
+      u('/modules'),
+      authed(({ db }) => HttpResponse.json(db.modules)),
+    ),
+
+    http.get(
+      u('/modules/:moduleId'),
+      authed(({ db, params }) => {
+        const m = db.modules.find((x) => x.id === params.moduleId);
+        return m ? HttpResponse.json(m) : notFound('Módulo');
+      }),
+    ),
+
+    ...(['post', 'put'] as const).map((method) =>
+      http[method](
+        u(method === 'post' ? '/modules' : '/modules/:moduleId'),
+        authed(async ({ db, user, request, params }) => {
+          const existing =
+            method === 'put' ? db.modules.find((x) => x.id === params.moduleId) : undefined;
+          if (method === 'put' && !existing) return notFound('Módulo');
+          const body = await parseBody(request, moduleInputSchema);
+          if ('response' in body) return body.response;
+          const input = body.data;
+          if (method === 'post' && db.modules.some((m) => m.code === input.code)) {
+            return err(400, 'VALIDATION_ERROR', 'Datos inválidos.', {
+              fields: [{ field: 'code', message: 'Ese código ya existe' }],
+            });
+          }
+          if (existing?.requiredCore && (!input.active || !input.requiredCore)) {
+            return err(409, 'REQUIRED_CORE_IMMUTABLE', 'Un módulo core no se puede desactivar.');
+          }
+          if (input.dependsOn.includes(input.code)) {
+            return err(409, 'MODULE_DEPENDENCY_SELF', 'Un módulo no puede depender de sí mismo.');
+          }
+          const unknown = input.dependsOn.filter((d) => !db.modules.some((m) => m.code === d));
+          if (unknown.length) return notFound(`Dependencia ${unknown.join(', ')}`);
+          const cycle = findDependencyCycle(db, input.code, input.dependsOn);
+          if (cycle) {
+            return err(
+              409,
+              'MODULE_DEPENDENCY_CYCLE',
+              `Ciclo de dependencias: ${cycle.join(' → ')}`,
+              {
+                cycle,
+              },
+            );
+          }
+          const before = existing ? structuredClone(existing) : null;
+          const saved = { ...existing, ...input, id: existing?.id ?? nextId(db, 'm') };
+          if (existing) Object.assign(existing, saved);
+          else {
+            db.modules.push(saved);
+            for (const plan of db.plans)
+              plan.modules.push({ moduleCode: saved.code, enabled: saved.requiredCore });
+          }
+          audit(db, request, user, {
+            action: existing ? 'MODULE_UPDATED' : 'MODULE_CREATED',
+            clinicId: null,
+            entityType: 'Module',
+            entityId: saved.id,
+            before,
+            after: saved,
+          });
+          return HttpResponse.json(saved, { status: existing ? 200 : 201 });
+        }),
+      ),
+    ),
+
+    http.delete(
+      u('/modules/:moduleId'),
+      authed(({ db, user, request, params }) => {
+        const m = db.modules.find((x) => x.id === params.moduleId);
+        if (!m) return notFound('Módulo');
+        if (m.requiredCore) {
+          return err(409, 'REQUIRED_CORE_IMMUTABLE', 'Un módulo core no se puede borrar.');
+        }
+        const dependents = db.modules
+          .filter((x) => x.dependsOn.includes(m.code))
+          .map((x) => x.code);
+        if (dependents.length) {
+          return err(409, 'MODULE_HAS_DEPENDENTS', `Otros módulos dependen de ${m.code}.`, {
+            dependents,
+          });
+        }
+        db.modules = db.modules.filter((x) => x.id !== m.id);
+        for (const plan of db.plans)
+          plan.modules = plan.modules.filter((pm) => pm.moduleCode !== m.code);
+        audit(db, request, user, {
+          action: 'MODULE_DELETED',
+          clinicId: null,
+          entityType: 'Module',
+          entityId: m.id,
+          before: m,
+          after: null,
+        });
+        return new HttpResponse(null, { status: 204 });
+      }),
+    ),
+
+    // ---- Especialidades ----
+    http.get(
+      u('/specialties'),
+      authed(({ db }) => HttpResponse.json(db.specialties)),
+    ),
+
+    // ---- Auditoría ----
+    http.get(
+      u('/audit-logs'),
+      authed(({ db, request }) => {
+        const url = new URL(request.url);
+        const p = (k: string) => url.searchParams.get(k);
+        const from = p('from') ? new Date(p('from')!) : null;
+        const to = p('to') ? new Date(p('to')!) : null;
+        const items = db.auditLogs.filter(
+          (a) =>
+            (!p('clinicId') || a.clinicId === p('clinicId')) &&
+            (!p('actorId') || a.actor.id === p('actorId')) &&
+            (!p('action') || a.action === p('action')) &&
+            (!from || new Date(a.createdAt) >= from) &&
+            (!to || new Date(a.createdAt) <= to),
+        );
+        return HttpResponse.json(paginate(items, url));
+      }),
+    ),
+  ];
+}

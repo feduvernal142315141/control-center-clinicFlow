@@ -29,6 +29,7 @@ test('crear plan y configurar su matriz con motivo', async ({ page }) => {
 test('el editor de dependencias muestra el camino del ciclo', async ({ page }) => {
   await loginAsAdmin(page, '/modulos');
   await page.getByRole('link', { name: 'Odontograma', exact: true }).click();
+  await expect(page).toHaveURL('/modulos/m-dental-odontogram');
   await expect(page.getByLabel('Código')).toHaveValue('DENTAL_ODONTOGRAM');
   await page
     .getByRole('group', { name: 'Dependencias' })
@@ -43,6 +44,7 @@ test('el editor de dependencias muestra el camino del ciclo', async ({ page }) =
 test('un módulo core no se puede desactivar ni borrar', async ({ page }) => {
   await loginAsAdmin(page, '/modulos');
   await page.getByRole('link', { name: 'Pacientes', exact: true }).click();
+  await expect(page).toHaveURL('/modulos/m-core-patients');
   await expect(page.getByLabel('Activo')).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Borrar módulo' })).toHaveCount(0);
 });

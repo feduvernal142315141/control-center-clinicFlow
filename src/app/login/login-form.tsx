@@ -5,7 +5,7 @@ import { useMutation } from '@tanstack/react-query';
 import { AlertTriangle, Info, Loader2, ShieldCheck } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { useForm, type FieldValues, type Path, type UseFormSetError } from 'react-hook-form';
+import { useForm } from 'react-hook-form';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,12 +20,7 @@ import {
   type LoginInput,
   type MfaInput,
 } from '@/lib/api/schemas';
-
-function applyFieldErrors<T extends FieldValues>(error: unknown, setError: UseFormSetError<T>) {
-  const fields = fieldErrorsOf(error);
-  for (const f of fields) setError(f.field as Path<T>, { message: f.message });
-  return fields.length > 0;
-}
+import { applyFieldErrors } from '@/lib/forms';
 
 function FormError({ error }: { error: unknown }) {
   if (!error) return null;

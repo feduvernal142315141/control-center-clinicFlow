@@ -108,11 +108,18 @@ const summary = ({ subscription: _s, ...c }: ClinicDetail) => c;
 
 type Ctx = { db: MockDb; user: MockUser; request: Request; params: Record<string, string> };
 
+export interface PlatformHandlersOptions {
+  /** Solo tests de componentes: acepta requests sin Bearer como el primer usuario. */
+  skipAuth?: boolean;
+}
+
+let handlerOptions: PlatformHandlersOptions = {};
+
 /** Envuelve un resolver que exige sesión de plataforma. */
 function authed(resolver: (ctx: Ctx) => Response | Promise<Response>) {
   return ({ request, params }: { request: Request; params: Record<string, unknown> }) => {
     const db = getDb();
-    const user = currentUser(db, request);
+    const user = handlerOptions.skipAuth ? db.users[0] : currentUser(db, request);
     if (!user) return err(401, 'UNAUTHENTICATED', 'Token inválido o expirado.');
     return resolver({ db, user, request, params: params as Record<string, string> });
   };
@@ -126,7 +133,11 @@ function findClinic(db: MockDb, id: string) {
 // Handlers
 // ---------------------------------------------------------------------------
 
-export function createPlatformHandlers(baseUrl: string): RequestHandler[] {
+export function createPlatformHandlers(
+  baseUrl: string,
+  options: PlatformHandlersOptions = {},
+): RequestHandler[] {
+  handlerOptions = options;
   const u = (path: string) => `${baseUrl}/platform${path}`;
 
   return [

@@ -1,0 +1,154 @@
+import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
+import { describe, expect, it, vi } from 'vitest';
+import { renderWithClient, setupMockApi } from '@test/render';
+import type { ClinicDetail } from '@/lib/api/schemas';
+import { getDb } from '@/mocks/db';
+import {
+  ChangePlanDialog,
+  ChangeSpecialtyDialog,
+  ReactivateClinicDialog,
+  SuspendClinicDialog,
+} from './clinic-action-dialogs';
+
+const server = setupMockApi();
+const API = 'http://localhost:3000/api/platform';
+const REASON = 'Falta de pago confirmada por finanzas';
+
+const clinic = (id: string): ClinicDetail =>
+  structuredClone(getDb().clinics.find((c) => c.id === id)!);
+
+function spyBody(method: 'post' | 'put', path: string) {
+  const bodies: unknown[] = [];
+  server.events.on('request:start', async ({ request }) => {
+    if (request.method === method.toUpperCase() && new URL(request.url).pathname === path) {
+      bodies.push(await request.clone().json());
+    }
+  });
+  return bodies;
+}
+
+describe('SuspendClinicDialog', () => {
+  it('no permite suspender hasta escribir el slug exacto y un motivo', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    const bodies = spyBody('post', '/api/platform/clinics/c-darmas/suspend');
+    renderWithClient(
+      <SuspendClinicDialog clinic={clinic('c-darmas')} open onOpenChange={onOpenChange} />,
+    );
+    const submit = screen.getByRole('button', { name: 'Suspender clínica' });
+    expect(submit).toBeDisabled();
+
+    await user.type(screen.getByLabelText(/para confirmar/), 'clinica-dental');
+    expect(submit).toBeDisabled();
+    await user.type(screen.getByLabelText(/para confirmar/), '-darmas');
+    expect(submit).toBeEnabled();
+
+    await user.click(submit);
+    expect(
+      await screen.findByText('El motivo debe tener al menos 10 caracteres'),
+    ).toBeInTheDocument();
+    expect(bodies).toHaveLength(0);
+
+    await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
+    await user.click(submit);
+    await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(bodies).toEqual([{ reason: REASON }]);
+    expect(getDb().clinics.find((c) => c.id === 'c-darmas')!.operationalStatus).toBe('SUSPENDED');
+  });
+
+  it('si el backend falla, muestra el error y no cierra', async () => {
+    server.use(
+      http.post(`${API}/clinics/c-darmas/suspend`, () =>
+        HttpResponse.json({ code: 'CONFLICT', message: 'Estado cambió' }, { status: 409 }),
+      ),
+    );
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    renderWithClient(
+      <SuspendClinicDialog clinic={clinic('c-darmas')} open onOpenChange={onOpenChange} />,
+    );
+    await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
+    await user.type(screen.getByLabelText(/para confirmar/), 'clinica-dental-darmas');
+    await user.click(screen.getByRole('button', { name: 'Suspender clínica' }));
+    expect(await screen.findByText('Estado cambió (CONFLICT)')).toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+});
+
+describe('ReactivateClinicDialog', () => {
+  it('exige motivo', async () => {
+    const user = userEvent.setup();
+    const bodies = spyBody('post', '/api/platform/clinics/c-sonrisas-norte/reactivate');
+    renderWithClient(
+      <ReactivateClinicDialog clinic={clinic('c-sonrisas-norte')} open onOpenChange={() => {}} />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Reactivar' }));
+    expect(
+      await screen.findByText('El motivo debe tener al menos 10 caracteres'),
+    ).toBeInTheDocument();
+    expect(bodies).toHaveLength(0);
+  });
+});
+
+describe('ChangeSpecialtyDialog', () => {
+  it('envía especialidad + motivo y no ofrece la actual', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    const bodies = spyBody('put', '/api/platform/clinics/c-darmas/specialty');
+    renderWithClient(
+      <ChangeSpecialtyDialog clinic={clinic('c-darmas')} open onOpenChange={onOpenChange} />,
+    );
+    const select = screen.getByLabelText('Nueva especialidad');
+    await screen.findByRole('option', { name: 'Podología' });
+    expect(screen.getByRole('option', { name: 'Odontología (actual)' })).toBeDisabled();
+
+    await user.selectOptions(select, 'PODIATRY');
+    await user.click(screen.getByRole('button', { name: 'Cambiar especialidad' }));
+    expect(
+      await screen.findByText('El motivo debe tener al menos 10 caracteres'),
+    ).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
+    await user.click(screen.getByRole('button', { name: 'Cambiar especialidad' }));
+    await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(bodies).toEqual([{ specialtyCode: 'PODIATRY', reason: REASON }]);
+  });
+});
+
+describe('ChangePlanDialog', () => {
+  it('envía fechas ISO con offset, trial y motivo', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    const bodies = spyBody('put', '/api/platform/clinics/c-vida/subscription');
+    renderWithClient(
+      <ChangePlanDialog clinic={clinic('c-vida')} open onOpenChange={onOpenChange} />,
+    );
+    await screen.findByRole('option', { name: 'Pro' });
+
+    await user.selectOptions(screen.getByLabelText('Plan'), 'PRO');
+    await user.click(screen.getByLabelText('Periodo de prueba (trial)')); // desmarca trial
+    await user.clear(screen.getByLabelText('Fin (opcional)'));
+    await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
+    await user.click(screen.getByRole('button', { name: 'Guardar suscripción' }));
+
+    await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(bodies).toHaveLength(1);
+    const body = bodies[0] as Record<string, unknown>;
+    expect(body).toMatchObject({ planCode: 'PRO', trial: false, endsAt: null, reason: REASON });
+    expect(body.startsAt).toMatch(/^\d{4}-\d{2}-\d{2}T.*(Z|[+-]\d{2}:\d{2})$/);
+  });
+
+  it('un trial sin fecha de fin no se envía', async () => {
+    const user = userEvent.setup();
+    const bodies = spyBody('put', '/api/platform/clinics/c-vida/subscription');
+    renderWithClient(<ChangePlanDialog clinic={clinic('c-vida')} open onOpenChange={() => {}} />);
+    await screen.findByRole('option', { name: 'Pro' });
+    await user.clear(screen.getByLabelText('Fin (opcional)'));
+    await user.type(screen.getByLabelText('Motivo (obligatorio)'), REASON);
+    await user.click(screen.getByRole('button', { name: 'Guardar suscripción' }));
+    expect(await screen.findByText('Un trial necesita fecha de fin')).toBeInTheDocument();
+    expect(bodies).toHaveLength(0);
+  });
+});

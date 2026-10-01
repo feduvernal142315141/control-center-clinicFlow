@@ -67,7 +67,8 @@ pnpm dev
 
 Primera vez con e2e: `pnpm exec playwright install chromium`.
 
-CI (`.github/workflows/ci.yml`): typecheck, lint, format, test, build y luego e2e.
+CI (`.github/workflows/ci.yml`): typecheck, lint, format, test, build y luego e2e. Corre en push a
+`main` y `feature/**`, y en pull requests.
 
 ## Arquitectura
 
@@ -135,6 +136,11 @@ Ajustar aquí y en `src/lib/api/schemas` si el backend decide otra cosa.
 - `GET /platform/me` → `{id, email, fullName, roles: ['SUPER_ADMIN'], mfaEnabled}`.
 - Paginación: `{content, page, size, totalElements, totalPages}`.
 - `GET /platform/dashboard` → `{totalClinics, active, trial, suspended, inactive, byPlan[], bySpecialty[]}`.
+- `POST /platform/clinics` body: `{name, slug, specialtyCode, planCode, trial, admin: {fullName, email}}`;
+  slug repetido → `VALIDATION_ERROR` con `details.fields = [{field: 'slug', …}]`.
+- `PUT /platform/clinics/{id}/subscription` body: `{planCode, startsAt, endsAt|null, trial, reason}`
+  (por `planCode`, no `planId`).
+- `suspend`, `reactivate`, `subscription` y `specialty` devuelven el `ClinicDetail` actualizado.
 - `PUT /platform/clinics/{id}/module-overrides` recibe el arreglo completo de overrides.
 - Errores de auth: `INVALID_CREDENTIALS` (401), `ACCOUNT_LOCKED` (423), `RATE_LIMITED` (429),
   `INVALID_MFA_CODE` / `MFA_SESSION_EXPIRED` (401).
@@ -143,8 +149,8 @@ Ajustar aquí y en `src/lib/api/schemas` si el backend decide otra cosa.
 
 - [x] Setup: repo, CI, MSW, README
 - [x] BO1: login por BFF + 2FA (flag), middleware, layout, logout, errores globales, e2e
-- [ ] BO2: dashboard, clínicas, acciones, módulos efectivos
+- [x] BO2: dashboard, clínicas (lista, crear, detalle), acciones con motivo, módulos efectivos
 - [ ] BO3: planes + matriz, catálogo de módulos
 - [ ] BO4: overrides, auditoría
 
-Los handlers MSW de BO2–BO4 ya existen (`src/mocks/handlers.ts`).
+Los handlers MSW de BO3–BO4 ya existen (`src/mocks/handlers.ts`).

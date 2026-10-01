@@ -1,15 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-
-const PASSWORD = 'KodeWave2026!';
-
-// No usar getByRole('alert'): Next.js tiene su propio route announcer con ese rol.
-const formAlert = (page: Page) => page.locator('[data-slot="alert"]');
-
-async function login(page: Page, email: string, password = PASSWORD) {
-  await page.getByLabel('Correo').fill(email);
-  await page.getByLabel('Contraseña').fill(password);
-  await page.getByRole('button', { name: 'Iniciar sesión' }).click();
-}
+import { expect, test } from '@playwright/test';
+import { formAlert, login } from './helpers';
 
 test('sin sesión, una ruta protegida redirige a /login y vuelve tras autenticarse', async ({
   page,

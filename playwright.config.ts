@@ -23,6 +23,8 @@ export default defineConfig({
       NEXT_PUBLIC_API_MOCKS: 'true',
       NEXT_PUBLIC_FEATURE_MFA: 'true',
       ALLOW_MOCKS_IN_PRODUCTION: 'true',
+      // Build aislado: se puede correr con `pnpm dev` abierto.
+      NEXT_DIST_DIR: '.next-e2e',
     },
   },
 });

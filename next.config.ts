@@ -3,6 +3,8 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   // Nunca usar typescript.ignoreBuildErrors ni eslint.ignoreDuringBuilds aquí.
   reactStrictMode: true,
+  // Los e2e compilan en su propia carpeta para no pisar el `.next` de `next dev`.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   poweredByHeader: false,
   async headers() {
     return [

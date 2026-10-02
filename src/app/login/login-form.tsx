@@ -3,7 +3,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation } from '@tanstack/react-query';
 import { AlertTriangle, Info, Loader2, ShieldCheck } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -21,6 +20,7 @@ import {
   type MfaInput,
 } from '@/lib/api/schemas';
 import { applyFieldErrors } from '@/lib/forms';
+import { hardNavigate } from '@/lib/navigation';
 
 function FormError({ error }: { error: unknown }) {
   if (!error) return null;
@@ -41,12 +41,11 @@ export function LoginForm({
   nextPath: string;
   notice?: string;
 }) {
-  const router = useRouter();
   const [step, setStep] = useState<'credentials' | 'mfa'>('credentials');
 
-  // Sin router.refresh(): no hay datos de servidor que dependan de la sesión y el refresh
-  // compite con la primera navegación del usuario.
-  const onAuthenticated = () => router.replace(nextPath);
+  // Navegación completa: el router de Next podría reutilizar una respuesta en caché de
+  // cuando la ruta redirigía a /login (sin sesión).
+  const onAuthenticated = () => hardNavigate(nextPath);
 
   const handleResult = (result: BffAuthResult) => {
     if (result.status === 'AUTHENTICATED') return onAuthenticated();

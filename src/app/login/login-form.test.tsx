@@ -7,8 +7,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { createQueryClient } from '@/lib/react-query';
 import { LoginForm } from './login-form';
 
-const router = { replace: vi.fn(), refresh: vi.fn() };
-vi.mock('next/navigation', () => ({ useRouter: () => router }));
+const nav = vi.hoisted(() => ({ hardNavigate: vi.fn() }));
+vi.mock('@/lib/navigation', () => nav);
 
 const LOGIN = 'http://localhost:3000/api/auth/login';
 const MFA = 'http://localhost:3000/api/auth/mfa';
@@ -19,8 +19,7 @@ beforeAll(() => server.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 beforeEach(() => {
-  router.replace.mockReset();
-  router.refresh.mockReset();
+  nav.hardNavigate.mockReset();
 });
 
 function renderForm(props: Partial<React.ComponentProps<typeof LoginForm>> = {}) {
@@ -51,7 +50,7 @@ describe('LoginForm', () => {
     server.use(http.post(LOGIN, () => HttpResponse.json({ status: 'AUTHENTICATED' })));
     renderForm();
     await fillCredentials();
-    await vi.waitFor(() => expect(router.replace).toHaveBeenCalledWith('/clinicas'));
+    await vi.waitFor(() => expect(nav.hardNavigate).toHaveBeenCalledWith('/clinicas'));
   });
 
   it('muestra el error del backend (credenciales, bloqueo, rate limit)', async () => {
@@ -66,7 +65,7 @@ describe('LoginForm', () => {
     renderForm();
     await fillCredentials();
     expect(await screen.findByRole('alert')).toHaveTextContent('La cuenta está bloqueada.');
-    expect(router.replace).not.toHaveBeenCalled();
+    expect(nav.hardNavigate).not.toHaveBeenCalled();
   });
 
   it('credenciales inválidas (401) muestran error sin disparar el logout global', async () => {
@@ -113,7 +112,7 @@ describe('LoginForm', () => {
     await user.clear(code);
     await user.type(code, '123456');
     await user.click(screen.getByRole('button', { name: 'Verificar' }));
-    await vi.waitFor(() => expect(router.replace).toHaveBeenCalledWith('/clinicas'));
+    await vi.waitFor(() => expect(nav.hardNavigate).toHaveBeenCalledWith('/clinicas'));
   });
 
   it('muestra el aviso de sesión expirada', () => {

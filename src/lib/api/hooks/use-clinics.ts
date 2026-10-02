@@ -21,11 +21,12 @@ export function useDashboard() {
   });
 }
 
-export function useClinics(query: ClinicListQuery) {
+export function useClinics(query: ClinicListQuery, enabled = true) {
   return useQuery({
     queryKey: queryKeys.clinics.list(query),
     queryFn: ({ signal }) => platformApi.listClinics(query, signal),
     placeholderData: keepPreviousData,
+    enabled,
   });
 }
 

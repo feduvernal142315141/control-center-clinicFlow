@@ -6,13 +6,11 @@ import { cn } from '@/lib/utils';
 
 const Tabs = TabsPrimitive.Root;
 
+/** Tabs subrayadas, al estilo de herramientas de operación. */
 function TabsList({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.List>) {
   return (
     <TabsPrimitive.List
-      className={cn(
-        'inline-flex h-9 w-fit items-center justify-center rounded-lg bg-muted p-[3px] text-muted-foreground',
-        className,
-      )}
+      className={cn('flex w-full items-center gap-1 overflow-x-auto border-b', className)}
       {...props}
     />
   );
@@ -22,7 +20,7 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        'inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1 text-sm font-medium whitespace-nowrap transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm',
+        'relative -mb-px inline-flex h-10 cursor-pointer items-center gap-1.5 border-b-2 border-transparent px-3 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[state=active]:border-primary data-[state=active]:text-foreground',
         className,
       )}
       {...props}
@@ -31,7 +29,12 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
 }
 
 function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Content>) {
-  return <TabsPrimitive.Content className={cn('mt-4 outline-none', className)} {...props} />;
+  return (
+    <TabsPrimitive.Content
+      className={cn('mt-5 animate-enter outline-none', className)}
+      {...props}
+    />
+  );
 }
 
 export { Tabs, TabsContent, TabsList, TabsTrigger };

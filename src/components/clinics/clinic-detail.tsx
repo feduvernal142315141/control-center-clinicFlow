@@ -1,9 +1,10 @@
 'use client';
 
-import { ArrowLeft, Pause, Pencil, Play, Stethoscope, Tags } from 'lucide-react';
+import { Pause, Pencil, Play, Stethoscope, Tags } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
+import { useBreadcrumbLabel } from '@/components/layout/breadcrumbs';
 import { PageHeader } from '@/components/layout/page-header';
 import { AuditLogView } from '@/components/audit/audit-log-view';
 import { EmptyState } from '@/components/states/empty-state';
@@ -35,6 +36,7 @@ type Tab = (typeof TABS)[number];
 
 export function ClinicDetail({ clinicId }: { clinicId: string }) {
   const clinic = useClinic(clinicId);
+  useBreadcrumbLabel(clinicId, clinic.data?.name);
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -73,14 +75,15 @@ export function ClinicDetail({ clinicId }: { clinicId: string }) {
 
   return (
     <>
-      <Button asChild variant="link" className="mb-2 h-auto px-0 text-muted-foreground">
-        <Link href="/clinicas">
-          <ArrowLeft /> Clínicas
-        </Link>
-      </Button>
       <PageHeader
         title={c.name}
-        description={c.slug}
+        meta={
+          <>
+            <ClinicStatusBadge status={c.operationalStatus} />
+            {c.trial && <TrialBadge />}
+            <code className="font-mono text-xs text-muted-foreground">{c.slug}</code>
+          </>
+        }
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => setAction('rename')}>
@@ -104,11 +107,6 @@ export function ClinicDetail({ clinicId }: { clinicId: string }) {
           </div>
         }
       />
-      <div className="-mt-4 mb-6 flex gap-1">
-        <ClinicStatusBadge status={c.operationalStatus} />
-        {c.trial && <TrialBadge />}
-      </div>
-
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="resumen">Resumen</TabsTrigger>

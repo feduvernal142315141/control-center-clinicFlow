@@ -8,7 +8,6 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { authApi } from '@/lib/api/endpoints/auth';
@@ -54,32 +53,32 @@ export function LoginForm({
   };
 
   return (
-    <Card className="w-full max-w-sm">
-      <CardHeader className="text-center">
-        <div className="mx-auto mb-2 grid size-10 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
+    <div className="w-full max-w-sm space-y-6">
+      <div className="space-y-2">
+        <div className="grid size-10 place-items-center rounded-lg bg-gradient-to-br from-primary to-[oklch(0.6_0.2_300)] text-sm font-bold text-white shadow-sm lg:hidden">
           KW
         </div>
-        <CardTitle className="text-xl">KodeWave Control Center</CardTitle>
-        <CardDescription>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {step === 'credentials' ? 'Inicia sesión' : 'Verificación en dos pasos'}
+        </h1>
+        <p className="text-sm text-muted-foreground">
           {step === 'credentials'
             ? 'Acceso exclusivo para el equipo KodeWave.'
             : 'Ingresa el código de tu app de autenticación.'}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {notice && step === 'credentials' && (
-          <Alert>
-            <Info />
-            <AlertDescription>{notice}</AlertDescription>
-          </Alert>
-        )}
-        {step === 'credentials' ? (
-          <CredentialsStep onResult={handleResult} />
-        ) : (
-          <MfaStep onAuthenticated={onAuthenticated} onRestart={() => setStep('credentials')} />
-        )}
-      </CardContent>
-    </Card>
+        </p>
+      </div>
+      {notice && step === 'credentials' && (
+        <Alert>
+          <Info />
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      )}
+      {step === 'credentials' ? (
+        <CredentialsStep onResult={handleResult} />
+      ) : (
+        <MfaStep onAuthenticated={onAuthenticated} onRestart={() => setStep('credentials')} />
+      )}
+    </div>
   );
 }
 

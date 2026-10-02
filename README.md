@@ -122,6 +122,29 @@ src/
 La app (`src/app`, `src/components`, `src/lib`) no puede importar `@/mocks/*` ni `@/server/*`
 (regla de ESLint); solo los route handlers usan `@/server/*`.
 
+### Diseño
+
+- **Estilo:** herramienta de operación al estilo Linear/Vercel/Stripe.
+  - Neutros fríos y un único acento índigo.
+  - Tipografía Geist con números tabulares en tablas y KPIs.
+  - Tablas densas con encabezado fijo.
+  - Cada estado lleva punto/icono + texto, nunca solo color.
+- **Tokens:** viven en `src/app/globals.css` (CSS variables + `@theme` de Tailwind v4). Los componentes usan
+  solo tokens (`bg-surface`, `text-muted-foreground`, `text-success`…), nunca colores sueltos.
+- **Claro/oscuro:**
+  - `color-scheme: light dark` + `light-dark()`: por defecto sigue al sistema.
+  - El botón de tema fija el contrario del que se ve; si coincide con el sistema, deja de fijarlo.
+  - La preferencia va en la cookie `kw_theme` (no sensible). El servidor la lee y pone `data-theme` y
+    `<meta name="color-scheme">` antes de pintar: sin parpadeo y sin `localStorage`.
+  - El estado del sidebar colapsado va en `kw_sidebar`.
+- **Navegación:**
+  - Sidebar agrupada (Operación / Catálogo / Control), colapsable, con insignia `MOCKS` cuando el BFF
+    usa mocks.
+  - Breadcrumbs con el nombre real de la clínica, plan o módulo.
+  - Paleta de comandos ⌘K / Ctrl+K: ir a secciones, acciones rápidas y buscar clínicas contra el backend.
+- **Política de navegadores:** evergreen (últimas 2 versiones de Chrome, Edge, Firefox y Safari). Es una
+  herramienta interna, así que se usan `light-dark()` y CSS moderno sin fallbacks.
+
 ### Errores
 
 Formato del backend: `{ code, message, details? }`. El cliente nunca se traga errores:

@@ -2,17 +2,22 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
+/**
+ * Badges suaves: fondo tintado + texto del tono. Los estados siempre llevan icono o punto,
+ * nunca solo color.
+ */
 const badgeVariants = cva(
-  'inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap [&>svg]:pointer-events-none [&>svg]:size-3',
+  'inline-flex w-fit shrink-0 items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap [&>svg]:pointer-events-none [&>svg]:size-3',
   {
     variants: {
       variant: {
-        default: 'border-transparent bg-primary text-primary-foreground',
-        secondary: 'border-transparent bg-secondary text-secondary-foreground',
-        destructive: 'border-transparent bg-destructive text-white',
-        success: 'border-transparent bg-success/15 text-success',
-        warning: 'border-transparent bg-warning/20 text-foreground',
-        outline: 'text-foreground',
+        default: 'border-primary/20 bg-primary/10 text-primary',
+        secondary: 'border-border bg-secondary text-secondary-foreground',
+        destructive: 'border-destructive/25 bg-destructive/10 text-destructive',
+        success: 'border-success/25 bg-success/10 text-success',
+        warning: 'border-warning/30 bg-warning/12 text-warning',
+        info: 'border-info/25 bg-info/10 text-info',
+        outline: 'border-border-strong/70 text-muted-foreground',
       },
     },
     defaultVariants: { variant: 'default' },
@@ -29,4 +34,9 @@ function Badge({
   );
 }
 
-export { Badge, badgeVariants };
+/** Punto de estado para acompañar el texto de un badge. */
+function StatusDot({ className }: { className?: string }) {
+  return <span aria-hidden className={cn('size-1.5 rounded-full bg-current', className)} />;
+}
+
+export { Badge, badgeVariants, StatusDot };

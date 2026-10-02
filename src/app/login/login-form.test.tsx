@@ -121,3 +121,20 @@ describe('LoginForm', () => {
     expect(screen.getByText('Tu sesión expiró. Vuelve a iniciar sesión.')).toBeInTheDocument();
   });
 });
+
+describe('LoginForm: mostrar contraseña', () => {
+  it('el ojito alterna entre oculta y visible', async () => {
+    const user = userEvent.setup();
+    renderForm();
+    const password = screen.getByLabelText('Contraseña');
+    await user.type(password, 'secreto');
+    expect(password).toHaveAttribute('type', 'password');
+
+    await user.click(screen.getByRole('button', { name: 'Mostrar contraseña' }));
+    expect(password).toHaveAttribute('type', 'text');
+    expect(password).toHaveValue('secreto');
+
+    await user.click(screen.getByRole('button', { name: 'Ocultar contraseña' }));
+    expect(password).toHaveAttribute('type', 'password');
+  });
+});

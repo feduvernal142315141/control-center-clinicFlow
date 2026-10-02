@@ -9,6 +9,7 @@ import { useForm } from 'react-hook-form';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { authApi } from '@/lib/api/endpoints/auth';
 import { API_ERROR_CODES, errorMessage, fieldErrorsOf, isApiError } from '@/lib/api/errors';
@@ -118,9 +119,8 @@ function CredentialsStep({ onResult }: { onResult: (r: BffAuthResult) => void })
       </div>
       <div className="space-y-2">
         <Label htmlFor="password">Contraseña</Label>
-        <Input
+        <PasswordInput
           id="password"
-          type="password"
           autoComplete="current-password"
           aria-invalid={!!errors.password}
           aria-describedby={errors.password ? 'password-error' : undefined}

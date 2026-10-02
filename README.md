@@ -66,15 +66,15 @@ pnpm dev
 
 ## Scripts
 
-| Script              | Qué hace                                                          |
-| ------------------- | ----------------------------------------------------------------- |
-| `pnpm typecheck`    | `tsc --noEmit`                                                    |
-| `pnpm lint`         | ESLint, 0 warnings                                                |
-| `pnpm format:check` | Prettier                                                          |
-| `pnpm test`         | Vitest (unit + componentes + BFF + mocks)                         |
-| `pnpm build`        | `next build` (nunca con `ignoreBuildErrors`/`ignoreDuringBuilds`) |
-| `pnpm e2e`          | Playwright: build + start con mocks en `:3100`                    |
-| `pnpm check`        | typecheck + lint + format + test + build                          |
+| Script              | Qué hace                                                                      |
+| ------------------- | ----------------------------------------------------------------------------- |
+| `pnpm typecheck`    | `tsc --noEmit`                                                                |
+| `pnpm lint`         | ESLint, 0 warnings                                                            |
+| `pnpm format:check` | Prettier                                                                      |
+| `pnpm test`         | Vitest (unit + componentes + BFF + mocks)                                     |
+| `pnpm build`        | `next build` (nunca con `ignoreBuildErrors`/`ignoreDuringBuilds`)             |
+| `pnpm e2e`          | Playwright: build + start con mocks en `:3100`                                |
+| `pnpm check`        | typecheck + lint + format + test + build (en `.next-e2e`, no pisa `next dev`) |
 
 Primera vez con e2e: `pnpm exec playwright install chromium`.
 

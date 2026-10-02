@@ -1,7 +1,6 @@
 'use client';
 
-import { ChevronDown, LogOut } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { ChevronsUpDown, LogOut, Moon, Sun } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,6 +12,8 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useLogout } from '@/lib/api/hooks/use-logout';
 import { useMe } from '@/lib/api/hooks/use-me';
+import { cn } from '@/lib/utils';
+import { useTheme } from './theme-toggle';
 
 const initials = (name: string) =>
   name
@@ -21,44 +22,53 @@ const initials = (name: string) =>
     .map((w) => w[0]?.toUpperCase() ?? '')
     .join('');
 
-export function UserMenu() {
+/** Pie del sidebar: identidad del usuario KodeWave, tema y cerrar sesión. */
+export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
   const me = useMe();
   const logout = useLogout();
+  const { theme, toggle } = useTheme();
 
-  if (me.isPending) return <Skeleton className="h-8 w-40" />;
-  if (me.isError) {
-    return (
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => logout.mutate()}
-        disabled={logout.isPending}
-      >
-        <LogOut /> Cerrar sesión
-      </Button>
-    );
-  }
+  if (me.isPending) return <Skeleton className={cn('h-10', collapsed ? 'w-10' : 'w-full')} />;
+
+  const name = me.data?.fullName ?? 'Sesión';
+  const email = me.data?.email ?? '';
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="gap-2 px-2" data-testid="user-menu">
-          <span className="grid size-7 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
-            {initials(me.data.fullName)}
-          </span>
-          <span className="hidden text-left text-sm leading-tight sm:block">
-            <span className="block font-medium">{me.data.fullName}</span>
-            <span className="block text-xs text-muted-foreground">{me.data.email}</span>
-          </span>
-          <ChevronDown className="size-4 text-muted-foreground" />
-        </Button>
+      <DropdownMenuTrigger
+        data-testid="user-menu"
+        className={cn(
+          'flex w-full cursor-pointer items-center gap-2.5 rounded-lg p-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-2',
+          collapsed && 'justify-center',
+        )}
+        aria-label={collapsed ? `Cuenta de ${email}` : undefined}
+      >
+        <span className="grid size-8 shrink-0 place-items-center rounded-md bg-gradient-to-br from-primary to-[oklch(0.6_0.2_300)] text-xs font-semibold text-white">
+          {initials(name)}
+        </span>
+        {!collapsed && (
+          <>
+            <span className="min-w-0 flex-1 leading-tight">
+              <span className="block truncate text-sm font-medium text-foreground">{name}</span>
+              <span className="block truncate text-xs text-muted-foreground">{email}</span>
+            </span>
+            <ChevronsUpDown className="size-4 shrink-0 text-subtle-foreground" />
+          </>
+        )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent side={collapsed ? 'right' : 'top'} align="start" className="w-60">
         <DropdownMenuLabel className="space-y-0.5">
-          <p>{me.data.fullName}</p>
-          <p className="text-xs font-normal text-muted-foreground">{me.data.roles.join(', ')}</p>
+          <p className="truncate">{name}</p>
+          <p className="truncate text-xs font-normal text-muted-foreground">{email}</p>
+          {me.data && (
+            <p className="text-xs font-normal text-muted-foreground">{me.data.roles.join(', ')}</p>
+          )}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={toggle}>
+          {theme === 'dark' ? <Sun /> : <Moon />}
+          {theme === 'dark' ? 'Tema claro' : 'Tema oscuro'}
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => logout.mutate()} disabled={logout.isPending}>
           <LogOut /> Cerrar sesión
         </DropdownMenuItem>

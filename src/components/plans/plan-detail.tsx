@@ -1,12 +1,12 @@
 'use client';
 
-import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
+import { useBreadcrumbLabel } from '@/components/layout/breadcrumbs';
 import { PageHeader } from '@/components/layout/page-header';
 import { EmptyState } from '@/components/states/empty-state';
 import { ErrorState } from '@/components/states/error-state';
 import { LoadingState } from '@/components/states/loading-state';
-import { Badge } from '@/components/ui/badge';
+import { Badge, StatusDot } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useModules, usePlan } from '@/lib/api/hooks/use-catalog-admin';
@@ -16,6 +16,7 @@ import { PlanMatrix } from './plan-matrix';
 
 export function PlanDetail({ planId }: { planId: string }) {
   const plan = usePlan(planId);
+  useBreadcrumbLabel(planId, plan.data?.name);
   const modules = useModules();
 
   const error = plan.error ?? modules.error;
@@ -52,19 +53,23 @@ export function PlanDetail({ planId }: { planId: string }) {
   };
   return (
     <>
-      <Button asChild variant="link" className="mb-2 h-auto px-0 text-muted-foreground">
-        <Link href="/planes">
-          <ArrowLeft /> Planes
-        </Link>
-      </Button>
-      <PageHeader title={p.name} description={p.code} />
-      <div className="-mt-4 mb-6">
-        {p.active ? (
-          <Badge variant="success">Activo</Badge>
-        ) : (
-          <Badge variant="outline">Inactivo</Badge>
-        )}
-      </div>
+      <PageHeader
+        title={p.name}
+        meta={
+          <>
+            {p.active ? (
+              <Badge variant="success">
+                <StatusDot /> Activo
+              </Badge>
+            ) : (
+              <Badge variant="outline">
+                <StatusDot /> Inactivo
+              </Badge>
+            )}
+            <code className="font-mono text-xs text-muted-foreground">{p.code}</code>
+          </>
+        }
+      />
       <div className="space-y-6">
         <Card>
           <CardHeader>

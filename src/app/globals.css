@@ -1,36 +1,87 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
-@custom-variant dark (&:is(.dark *));
+/*
+ * KodeWave Control Center — sistema visual.
+ * Neutros fríos + un solo acento índigo. Claro/oscuro con `color-scheme` + `light-dark()`:
+ * por defecto sigue al sistema; `data-theme` en <html> lo fija (cookie `kw_theme`).
+ * Política de navegadores: evergreen (últimas 2 versiones), herramienta interna.
+ */
+
+/* `dark:` de Tailwind = tema oscuro efectivo (fijado o por sistema). */
+@custom-variant dark {
+  :root[data-theme='dark'] & {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) & {
+      @slot;
+    }
+  }
+}
 
 :root {
+  color-scheme: light dark;
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.42 0.13 255);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.52 0 0);
-  --accent: oklch(0.96 0.01 255);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --success: oklch(0.55 0.14 150);
-  --warning: oklch(0.75 0.15 75);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.55 0.13 255);
-  --sidebar: oklch(0.205 0.02 255);
-  --sidebar-foreground: oklch(0.92 0.01 255);
-  --sidebar-accent: oklch(0.3 0.04 255);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.28 0.02 255);
+
+  /* Superficies */
+  --background: light-dark(oklch(0.982 0.003 265), oklch(0.155 0.01 270));
+  --surface: light-dark(oklch(1 0 0), oklch(0.188 0.012 270));
+  --surface-sunken: light-dark(oklch(0.965 0.004 265), oklch(0.135 0.01 270));
+  --sidebar: light-dark(oklch(0.972 0.004 265), oklch(0.142 0.01 270));
+  --popover: light-dark(oklch(1 0 0), oklch(0.205 0.013 270));
+
+  /* Texto */
+  --foreground: light-dark(oklch(0.205 0.018 270), oklch(0.955 0.005 270));
+  --muted-foreground: light-dark(oklch(0.52 0.015 270), oklch(0.7 0.012 270));
+  --subtle-foreground: light-dark(oklch(0.62 0.012 270), oklch(0.58 0.012 270));
+
+  /* Líneas */
+  --border: light-dark(oklch(0.912 0.006 270), oklch(0.27 0.012 270));
+  --border-strong: light-dark(oklch(0.86 0.008 270), oklch(0.34 0.014 270));
+  --input: light-dark(oklch(0.88 0.008 270), oklch(0.32 0.014 270));
+
+  /* Acento */
+  --primary: light-dark(oklch(0.52 0.2 270), oklch(0.7 0.155 270));
+  --primary-hover: light-dark(oklch(0.47 0.2 270), oklch(0.76 0.14 270));
+  --primary-foreground: light-dark(oklch(0.99 0 0), oklch(0.16 0.03 270));
+  --ring: light-dark(oklch(0.6 0.19 270), oklch(0.72 0.15 270));
+
+  /* Interacción neutra */
+  --accent: light-dark(oklch(0.952 0.007 270), oklch(0.245 0.014 270));
+  --accent-foreground: var(--foreground);
+  --secondary: light-dark(oklch(0.955 0.006 270), oklch(0.25 0.014 270));
+  --secondary-foreground: var(--foreground);
+  --muted: light-dark(oklch(0.955 0.005 270), oklch(0.235 0.012 270));
+
+  /* Semánticos (siempre con icono/texto, nunca solo color) */
+  --success: light-dark(oklch(0.52 0.13 155), oklch(0.75 0.15 155));
+  --warning: light-dark(oklch(0.6 0.14 65), oklch(0.8 0.14 75));
+  --destructive: light-dark(oklch(0.55 0.21 25), oklch(0.7 0.18 22));
+  --destructive-foreground: light-dark(oklch(0.99 0 0), oklch(0.17 0.03 25));
+  --info: light-dark(oklch(0.55 0.15 235), oklch(0.75 0.12 230));
+
+  /* Compatibilidad con nombres shadcn */
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover-foreground: var(--foreground);
+  --sidebar-foreground: var(--muted-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+
+  /* Elevación */
+  --shadow-color: light-dark(oklch(0.2 0.02 270 / 0.06), oklch(0 0 0 / 0.4));
+
+  accent-color: var(--primary);
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -40,25 +91,32 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-info: var(--info);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
@@ -66,13 +124,52 @@
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
+
+  --shadow-xs: 0 1px 2px var(--shadow-color);
+  --shadow-sm: 0 1px 3px var(--shadow-color), 0 1px 2px var(--shadow-color);
+  --shadow-md: 0 4px 12px -2px var(--shadow-color), 0 2px 4px -2px var(--shadow-color);
+  --shadow-lg: 0 16px 40px -8px var(--shadow-color), 0 4px 12px -4px var(--shadow-color);
+
+  --animate-enter: enter 180ms cubic-bezier(0.2, 0, 0, 1) both;
+
+  @keyframes enter {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring/60;
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 25%, transparent);
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  /* Los números se alinean en tablas y KPIs. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }

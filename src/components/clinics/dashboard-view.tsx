@@ -18,18 +18,58 @@ import { useDashboard } from '@/lib/api/hooks/use-clinics';
 import type { TrialItem } from '@/lib/api/schemas';
 import { formatDate } from '@/lib/format';
 
+type TileKey = 'totalClinics' | 'active' | 'trial' | 'suspended' | 'inactive';
+
 const TILES: {
-  key: 'totalClinics' | 'active' | 'trial' | 'suspended' | 'inactive';
+  key: TileKey;
   label: string;
   icon: typeof Building2;
   href: string;
+  /** Tono del icono y de la barra; el valor siempre va en texto. */
+  tone: string;
+  bar: string;
 }[] = [
-  { key: 'totalClinics', label: 'Total de clínicas', icon: Building2, href: '/clinicas' },
-  { key: 'active', label: 'Activas', icon: CircleCheck, href: '/clinicas?status=ACTIVE' },
+  {
+    key: 'totalClinics',
+    label: 'Total de clínicas',
+    icon: Building2,
+    href: '/clinicas',
+    tone: 'text-primary bg-primary/10',
+    bar: 'bg-primary',
+  },
+  {
+    key: 'active',
+    label: 'Activas',
+    icon: CircleCheck,
+    href: '/clinicas?status=ACTIVE',
+    tone: 'text-success bg-success/10',
+    bar: 'bg-success',
+  },
   // Trial = suscripción en trial (no es estado operativo).
-  { key: 'trial', label: 'En trial', icon: CircleDashed, href: '/clinicas?trial=true' },
-  { key: 'suspended', label: 'Suspendidas', icon: CirclePause, href: '/clinicas?status=SUSPENDED' },
-  { key: 'inactive', label: 'Inactivas', icon: CircleSlash, href: '/clinicas?status=INACTIVE' },
+  {
+    key: 'trial',
+    label: 'En trial',
+    icon: CircleDashed,
+    href: '/clinicas?trial=true',
+    tone: 'text-info bg-info/10',
+    bar: 'bg-info',
+  },
+  {
+    key: 'suspended',
+    label: 'Suspendidas',
+    icon: CirclePause,
+    href: '/clinicas?status=SUSPENDED',
+    tone: 'text-destructive bg-destructive/10',
+    bar: 'bg-destructive',
+  },
+  {
+    key: 'inactive',
+    label: 'Inactivas',
+    icon: CircleSlash,
+    href: '/clinicas?status=INACTIVE',
+    tone: 'text-muted-foreground bg-muted',
+    bar: 'bg-muted-foreground',
+  },
 ];
 
 export function DashboardView() {
@@ -41,32 +81,51 @@ export function DashboardView() {
   }
 
   const data = dashboard.data;
+  const total = Math.max(1, data?.totalClinics ?? 1);
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
-        {TILES.map(({ key, label, icon: Icon, href }) => (
-          <Link
-            key={key}
-            href={href}
-            className="rounded-xl focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
-          >
-            <Card className="gap-2 py-4 transition-colors hover:bg-muted/40">
-              <CardHeader className="flex flex-row items-center justify-between gap-2 px-4">
-                <CardTitle className="text-sm font-medium text-muted-foreground">{label}</CardTitle>
-                <Icon className="size-4 text-muted-foreground" aria-hidden />
-              </CardHeader>
-              <CardContent className="px-4">
-                {data ? (
-                  <p className="text-3xl font-semibold tabular-nums" data-testid={`kpi-${key}`}>
-                    {data[key]}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        {TILES.map(({ key, label, icon: Icon, href, tone, bar }) => {
+          const value = data?.[key];
+          const share = key === 'totalClinics' || value === undefined ? null : value / total;
+          return (
+            <Link key={key} href={href} className="group rounded-xl">
+              <Card className="h-full gap-3 py-4 transition-[border-color,box-shadow] group-hover:border-border-strong group-hover:shadow-sm">
+                <CardHeader className="flex flex-row items-center justify-between gap-2 px-4">
+                  <CardTitle className="text-[13px] font-medium text-muted-foreground">
+                    {label}
+                  </CardTitle>
+                  <span className={`grid size-7 place-items-center rounded-md ${tone}`}>
+                    <Icon className="size-3.5" aria-hidden />
+                  </span>
+                </CardHeader>
+                <CardContent className="space-y-2 px-4">
+                  {data ? (
+                    <p
+                      className="text-[28px] leading-none font-semibold tracking-tight tabular-nums"
+                      data-testid={`kpi-${key}`}
+                    >
+                      {value}
+                    </p>
+                  ) : (
+                    <Skeleton className="h-7 w-14" />
+                  )}
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    {share === null
+                      ? 'Todas las clínicas'
+                      : `${Math.round(share * 100)}% del total`}
                   </p>
-                ) : (
-                  <Skeleton className="h-9 w-16" />
-                )}
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
+                  <div className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden>
+                    <div
+                      className={`h-full rounded-full ${bar}`}
+                      style={{ width: `${share === null ? 100 : share * 100}%` }}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+          );
+        })}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -210,9 +269,9 @@ function Breakdown({
                     <span>{r.label}</span>
                     <span className="font-medium tabular-nums">{r.count}</span>
                   </div>
-                  <div className="mt-1 h-2 rounded-full bg-muted" aria-hidden>
+                  <div className="mt-1.5 h-1.5 rounded-full bg-muted" aria-hidden>
                     <div
-                      className="h-2 rounded-full bg-primary"
+                      className="h-1.5 rounded-full bg-primary"
                       style={{ width: `${(r.count / max) * 100}%` }}
                     />
                   </div>

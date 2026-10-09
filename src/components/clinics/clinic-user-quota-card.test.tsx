@@ -12,32 +12,38 @@ const quotaValue = (label: string) => screen.getByText(label).parentElement as H
 describe('ClinicUserQuotaCard', () => {
   it('muestra el snapshot y permite aumentar los cupos adicionales', async () => {
     const user = userEvent.setup();
+    getDb().clinics.find(
+      (clinic) => clinic.id === 'c-podologico-x',
+    )!.subscription!.additionalUsers = 2;
     renderWithClient(<ClinicUserQuotaCard clinicId="c-podologico-x" />);
 
     expect(await screen.findByText('Usuarios de la clínica')).toBeInTheDocument();
     expect(screen.getByText('Cupos del snapshot del plan Pro.')).toBeInTheDocument();
     expect(quotaValue('Límite del plan')).toHaveTextContent('5');
-    expect(quotaValue('Límite efectivo')).toHaveTextContent('5');
-    expect(quotaValue('Disponibles')).toHaveTextContent('3');
+    expect(quotaValue('Cupos adicionales')).toHaveTextContent('2');
+    expect(quotaValue('Límite efectivo')).toHaveTextContent('7');
+    expect(quotaValue('Disponibles')).toHaveTextContent('5');
 
     await user.click(screen.getByRole('button', { name: 'Ajustar cupos' }));
-    const dialog = screen.getByRole('dialog', { name: 'Ajustar cupos adicionales' });
-    const input = within(dialog).getByLabelText('Cupos adicionales');
+    const dialog = screen.getByRole('dialog', { name: 'Agregar cupos adicionales' });
+    const input = within(dialog).getByLabelText('Cantidad a agregar');
     await user.clear(input);
     await user.type(input, '3');
+    expect(within(dialog).getByText(/Después del cambio: 5/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Nuevo límite efectivo: 10/)).toBeInTheDocument();
     await user.type(
       within(dialog).getByLabelText('Motivo (obligatorio)'),
       'Ampliación comercial aprobada',
     );
-    await user.click(within(dialog).getByRole('button', { name: 'Guardar cupos' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Agregar cupos' }));
 
     expect(await screen.findByText('Cupos actualizados')).toBeInTheDocument();
-    expect(quotaValue('Cupos adicionales')).toHaveTextContent('3');
-    expect(quotaValue('Límite efectivo')).toHaveTextContent('8');
-    expect(quotaValue('Disponibles')).toHaveTextContent('6');
+    expect(quotaValue('Cupos adicionales')).toHaveTextContent('5');
+    expect(quotaValue('Límite efectivo')).toHaveTextContent('10');
+    expect(quotaValue('Disponibles')).toHaveTextContent('8');
     expect(
       getDb().clinics.find((clinic) => clinic.id === 'c-podologico-x')?.subscription,
-    ).toMatchObject({ additionalUsers: 3 });
+    ).toMatchObject({ additionalUsers: 5 });
     expect(getDb().auditLogs[0]).toMatchObject({
       action: 'USER_QUOTA_CHANGED',
       reason: 'Ampliación comercial aprobada',

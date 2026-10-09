@@ -23,7 +23,7 @@ import { ErrorState } from '../states/error-state';
 import { LoadingState } from '../states/loading-state';
 
 const formSchema = z.object({
-  additionalUsers: z.number().int('Debe ser un número entero').nonnegative('No puede ser negativo'),
+  usersToAdd: z.number().int('Debe ser un número entero').positive('Debe agregar al menos un cupo'),
   reason: reasonSchema,
 });
 type FormValues = z.infer<typeof formSchema>;
@@ -65,9 +65,14 @@ function QuotaCardContent({
   const form = useForm<FormValues>({ resolver: zodResolver(formSchema) });
   const versioning = useOptimisticVersion(data, {
     isDirty: form.formState.isDirty,
-    resetTo: (server) => form.reset({ additionalUsers: server.additionalUsers, reason: '' }),
+    resetTo: () => form.reset({ usersToAdd: 1, reason: '' }),
   });
-  useResetOnOpen(form, open, { additionalUsers: data.additionalUsers, reason: '' });
+  useResetOnOpen(form, open, { usersToAdd: 1, reason: '' });
+  const usersToAdd = form.watch('usersToAdd');
+  const validUsersToAdd = Number.isSafeInteger(usersToAdd) && usersToAdd > 0 ? usersToAdd : 0;
+  const resultingAdditionalUsers = data.additionalUsers + validUsersToAdd;
+  const resultingEffectiveLimit =
+    data.planLimit === null ? null : data.planLimit + resultingAdditionalUsers;
   const snapshotLabel = data.planName
     ? `Cupos del snapshot del plan ${data.planName}.`
     : 'Cupos del snapshot sin plan asignado.';
@@ -110,18 +115,22 @@ function QuotaCardContent({
       <ActionDialog
         open={open}
         onOpenChange={changeOpen}
-        title="Ajustar cupos adicionales"
+        title="Agregar cupos adicionales"
         description={
           <p>
-            Define cuántos usuarios se agregan al límite contratado por{' '}
-            {data.planName ?? 'la clínica'}.
+            La cantidad ingresada se sumará a los {data.additionalUsers} cupos adicionales que ya
+            tiene {data.planName ?? 'la clínica'}.
           </p>
         }
-        submitLabel="Guardar cupos"
+        submitLabel="Agregar cupos"
         pending={update.isPending}
-        onSubmit={form.handleSubmit((values) =>
+        onSubmit={form.handleSubmit(({ usersToAdd, reason }) =>
           update.mutate(
-            { ...values, version: versioning.baseVersion },
+            {
+              additionalUsers: data.additionalUsers + usersToAdd,
+              reason,
+              version: versioning.baseVersion,
+            },
             {
               onSuccess: (saved) => {
                 versioning.onSaved(saved);
@@ -146,18 +155,18 @@ function QuotaCardContent({
           </Alert>
         )}
         <FormField
-          id="additionalUsers"
-          label="Cupos adicionales"
-          hint={`Límite contratado: ${limitLabel(data.planLimit)}. Límite efectivo actual: ${limitLabel(data.effectiveLimit)}.`}
-          error={form.formState.errors.additionalUsers?.message}
+          id="usersToAdd"
+          label="Cantidad a agregar"
+          hint={`Adicionales actuales: ${data.additionalUsers}. Después del cambio: ${resultingAdditionalUsers}. Nuevo límite efectivo: ${limitLabel(resultingEffectiveLimit)}.`}
+          error={form.formState.errors.usersToAdd?.message}
         >
           {(aria) => (
             <Input
               {...aria}
               type="number"
-              min={0}
+              min={1}
               step={1}
-              {...form.register('additionalUsers', { valueAsNumber: true })}
+              {...form.register('usersToAdd', { valueAsNumber: true })}
             />
           )}
         </FormField>

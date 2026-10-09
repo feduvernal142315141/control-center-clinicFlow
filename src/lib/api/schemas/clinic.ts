@@ -62,7 +62,7 @@ export const clinicUserQuotaSchema = z.object({
 export type ClinicUserQuota = z.infer<typeof clinicUserQuotaSchema>;
 
 export const updateClinicUserQuotaInputSchema = z.object({
-  additionalUsers: z.number().int().nonnegative(),
+  usersToAdd: z.number().int().positive(),
   reason: reasonSchema,
   version: versionSchema,
 });

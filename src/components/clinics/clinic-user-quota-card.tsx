@@ -127,7 +127,7 @@ function QuotaCardContent({
         onSubmit={form.handleSubmit(({ usersToAdd, reason }) =>
           update.mutate(
             {
-              additionalUsers: data.additionalUsers + usersToAdd,
+              usersToAdd,
               reason,
               version: versioning.baseVersion,
             },

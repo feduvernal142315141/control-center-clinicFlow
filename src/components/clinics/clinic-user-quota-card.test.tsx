@@ -56,4 +56,23 @@ describe('ClinicUserQuotaCard', () => {
     expect(screen.getByRole('button', { name: 'Ajustar cupos' })).toBeDisabled();
     expect(screen.getByText('Límite alcanzado')).toBeInTheDocument();
   });
+
+  it('no permite enviar una cantidad negativa', async () => {
+    const user = userEvent.setup();
+    const clinic = getDb().clinics.find((item) => item.id === 'c-podologico-x')!;
+    const initialAdditionalUsers = clinic.subscription!.additionalUsers;
+    renderWithClient(<ClinicUserQuotaCard clinicId="c-podologico-x" />);
+
+    await screen.findByText('Usuarios de la clínica');
+    await user.click(screen.getByRole('button', { name: 'Ajustar cupos' }));
+    const dialog = screen.getByRole('dialog', { name: 'Agregar cupos adicionales' });
+    const input = within(dialog).getByLabelText('Cantidad a agregar');
+    await user.clear(input);
+    await user.type(input, '-1');
+    await user.type(within(dialog).getByLabelText('Motivo (obligatorio)'), 'Intento inválido');
+    await user.click(within(dialog).getByRole('button', { name: 'Agregar cupos' }));
+
+    expect(await within(dialog).findByText('Debe agregar al menos un cupo')).toBeInTheDocument();
+    expect(clinic.subscription!.additionalUsers).toBe(initialAdditionalUsers);
+  });
 });

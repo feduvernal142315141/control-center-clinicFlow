@@ -603,7 +603,7 @@ export function createPlatformHandlers(
           return versionConflict('La clínica', clinic.version);
         }
         const before = { additionalUsers: clinic.subscription.additionalUsers };
-        clinic.subscription.additionalUsers = body.data.additionalUsers;
+        clinic.subscription.additionalUsers += body.data.usersToAdd;
         clinic.version += 1;
         audit(db, request, user, {
           action: 'USER_QUOTA_CHANGED',

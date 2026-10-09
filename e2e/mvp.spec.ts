@@ -41,7 +41,7 @@ test('flujo completo del MVP', async ({ page }) => {
     await dialog.getByLabel('Motivo (obligatorio)').fill(REASON('upgrade'));
     await dialog.getByRole('button', { name: 'Guardar suscripción' }).click();
     await expect(dialog).toBeHidden();
-    await expect(page.getByText('Premium')).toBeVisible();
+    await expect(page.getByText('Premium', { exact: true })).toBeVisible();
   });
 
   await test.step('override OFF de WhatsApp con efecto real', async () => {

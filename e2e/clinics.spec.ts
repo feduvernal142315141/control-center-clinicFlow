@@ -92,7 +92,7 @@ test('cambiar plan con motivo', async ({ page }) => {
   await dialog.getByLabel('Motivo (obligatorio)').fill('Upgrade comercial acordado con la clínica');
   await dialog.getByRole('button', { name: 'Guardar suscripción' }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.getByText('Premium')).toBeVisible();
+  await expect(page.getByText('Premium', { exact: true })).toBeVisible();
 });
 
 test('una clínica INACTIVE se reactiva con motivo', async ({ page }) => {

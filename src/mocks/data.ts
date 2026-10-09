@@ -232,7 +232,18 @@ export const seedPlans: Plan[] = [
 
 const daysFromNow = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
 
-const planId = (code: string) => seedPlans.find((p) => p.code === code)!.id;
+const planSnapshot = (code: string) => {
+  const plan = seedPlans.find((p) => p.code === code)!;
+  return {
+    planId: plan.id,
+    planCode: plan.code,
+    planName: plan.name,
+    planDescription: plan.description ?? null,
+    catalogPlanVersion: plan.version,
+    modules: structuredClone(plan.modules),
+    additionalUsers: 0,
+  };
+};
 
 function clinic(
   id: string,
@@ -260,8 +271,7 @@ function clinic(
     subscription: planCode
       ? {
           id: `s-${id}`,
-          planId: planId(planCode),
-          planCode,
+          ...planSnapshot(planCode),
           status: trial ? 'TRIAL' : operationalStatus === 'SUSPENDED' ? 'PAST_DUE' : 'ACTIVE',
           startsAt: createdAt,
           endsAt: trial ? trialEndsAt : null,

@@ -5,6 +5,14 @@ especialidades, módulos, overrides y auditoría. No es para usuarios de clínic
 
 Consume el monolito Spring Boot **solo** por `/platform/**`, siempre a través del BFF de Next.js.
 
+## Guías del proyecto
+
+- [Estructura y arquitectura](docs/ESTRUCTURA.md): mapa de carpetas, flujos y límites.
+- [Patrones de implementación](docs/PATRONES.md): contratos, consultas, formularios y pruebas.
+- [Reglas de desarrollo](docs/REGLAS.md): convenciones y restricciones del proyecto.
+- [Flujo IA y Definition of Done](docs/FLUJO_IA.md): contexto mínimo y validación proporcional.
+- [Guía para agentes](AGENTS.md) y [skill ClinicFlow](.agents/skills/clinicflow-control-center/SKILL.md).
+
 ## Stack
 
 Next.js 15 (App Router, TS strict) · Tailwind v4 + shadcn/ui (Radix) · TanStack Query/Table ·
@@ -216,7 +224,7 @@ con `details.fields = [{field, message}]`; paginación `{content, page, size, to
 
 - `ClinicSummary` = `{id, name, slug, specialtyCode, operationalStatus, planCode|null, trial, createdAt}`.
   `trial` refleja `subscription.trial` (`false` sin suscripción).
-- `ClinicDetail` = `ClinicSummary` + `subscription: {id, planId, planCode, status, startsAt, endsAt|null, renewalDate|null, trial} | null` + `version` (D17).
+- `ClinicDetail` = `ClinicSummary` + `subscription: {id, planId, planCode, planName, planDescription|null, catalogPlanVersion, modules: PlanModule[], additionalUsers, status, startsAt, endsAt|null, renewalDate|null, trial} | null` + `version` (D17). Los datos comerciales de la suscripción son el snapshot aceptado por la clínica, no una lectura del catálogo vivo.
 - `GET /platform/clinics?q&status&planCode&specialtyCode&trial&page&size` → página de `ClinicSummary`.
   `status` ∈ D1; `trial=true|false` filtra por suscripción.
 - `POST /platform/clinics`
@@ -232,6 +240,8 @@ con `details.fields = [{field, message}]`; paginación `{content, page, size, to
   - `PUT /platform/clinics/{id}/subscription` `{planCode, startsAt, endsAt|null, trial, reason, version}`
     → `PLAN_CHANGED` (D2–D4).
   - `PUT /platform/clinics/{id}/specialty` `{specialtyCode, reason, version}` → `SPECIALTY_CHANGED`.
+- `GET /platform/clinics/{id}/user-quota` → `{clinicId, planCode|null, planLimit|null, additionalUsers, effectiveLimit|null, usedUsers, availableUsers|null, canAddUser, version, subscriptionId|null, catalogPlanId|null, planName|null, planDescription|null, catalogPlanVersion, modules: PlanModule[]}`.
+- `PUT /platform/clinics/{id}/user-quota` `{additionalUsers, reason, version}` → el mismo contrato de cupos con la versión nueva; el cambio queda auditado como `USER_QUOTA_CHANGED`.
 
 ### Módulos efectivos y vista previa
 

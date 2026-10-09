@@ -11,12 +11,15 @@ import {
   planModulesInputSchema,
   clinicStatusInputSchema,
   clinicOverridesUpdateInputSchema,
+  updateClinicUserQuotaInputSchema,
   updateClinicInputSchema,
   type ClinicDetail,
+  type ClinicUserQuota,
   type Dashboard,
   type ModuleOverride,
   type Page,
   type PlanModule,
+  type Plan,
   type PlatformMe,
 } from '@/lib/api/schemas';
 import { MOCK_TOTP_CODE, type MockUser } from './data';
@@ -220,6 +223,65 @@ function findClinic(db: MockDb, id: string) {
   return db.clinics.find((c) => c.id === id);
 }
 
+function subscriptionSnapshot(plan: Plan, additionalUsers = 0) {
+  return {
+    planId: plan.id,
+    planCode: plan.code,
+    planName: plan.name,
+    planDescription: plan.description ?? null,
+    catalogPlanVersion: plan.version,
+    modules: structuredClone(plan.modules),
+    additionalUsers,
+  };
+}
+
+function clinicUserQuota(clinic: ClinicDetail): ClinicUserQuota {
+  const subscription = clinic.subscription;
+  const usedUsers = 2;
+  if (!subscription) {
+    return {
+      clinicId: clinic.id,
+      planCode: null,
+      planLimit: 0,
+      additionalUsers: 0,
+      effectiveLimit: 0,
+      usedUsers,
+      availableUsers: 0,
+      canAddUser: false,
+      version: clinic.version,
+      subscriptionId: null,
+      catalogPlanId: null,
+      planName: null,
+      planDescription: null,
+      catalogPlanVersion: 0,
+      modules: [],
+    };
+  }
+  const professionals = subscription.modules.find(
+    (module) => module.enabled && module.moduleCode === 'CORE_PROFESSIONALS',
+  );
+  const planLimit = professionals?.limits?.maxProfessionals ?? null;
+  const effectiveLimit = planLimit === null ? null : planLimit + subscription.additionalUsers;
+  const availableUsers = effectiveLimit === null ? null : Math.max(0, effectiveLimit - usedUsers);
+  return {
+    clinicId: clinic.id,
+    planCode: subscription.planCode,
+    planLimit,
+    additionalUsers: subscription.additionalUsers,
+    effectiveLimit,
+    usedUsers,
+    availableUsers,
+    canAddUser: effectiveLimit === null || usedUsers < effectiveLimit,
+    version: clinic.version,
+    subscriptionId: subscription.id,
+    catalogPlanId: subscription.planId,
+    planName: subscription.planName,
+    planDescription: subscription.planDescription,
+    catalogPlanVersion: subscription.catalogPlanVersion,
+    modules: subscription.modules,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -391,8 +453,7 @@ export function createPlatformHandlers(
           version: 1,
           subscription: {
             id: nextId(db, 's'),
-            planId: plan.id,
-            planCode: plan.code,
+            ...subscriptionSnapshot(plan),
             status: input.trial ? 'TRIAL' : 'ACTIVE',
             startsAt: now,
             endsAt: input.trial ? input.trialEndsAt : null,
@@ -499,8 +560,7 @@ export function createPlatformHandlers(
         clinic.trial = body.data.trial;
         clinic.subscription = {
           id: clinic.subscription?.id ?? nextId(db, 's'),
-          planId: plan.id,
-          planCode: plan.code,
+          ...subscriptionSnapshot(plan, clinic.subscription?.additionalUsers ?? 0),
           status: body.data.trial ? 'TRIAL' : 'ACTIVE',
           startsAt: body.data.startsAt,
           endsAt: body.data.endsAt,
@@ -518,6 +578,43 @@ export function createPlatformHandlers(
           reason: body.data.reason,
         });
         return HttpResponse.json(clinic);
+      }),
+    ),
+
+    http.get(
+      u('/clinics/:clinicId/user-quota'),
+      authed(({ db, params }) => {
+        const clinic = findClinic(db, params.clinicId);
+        return clinic ? HttpResponse.json(clinicUserQuota(clinic)) : notFound('Clínica');
+      }),
+    ),
+
+    http.put(
+      u('/clinics/:clinicId/user-quota'),
+      authed(async ({ db, user, request, params }) => {
+        const clinic = findClinic(db, params.clinicId);
+        if (!clinic) return notFound('Clínica');
+        if (!clinic.subscription) {
+          return err(409, 'CLINIC_WITHOUT_SUBSCRIPTION', 'La clínica no tiene una suscripción.');
+        }
+        const body = await parseBody(request, updateClinicUserQuotaInputSchema);
+        if ('response' in body) return body.response;
+        if (body.data.version !== clinic.version) {
+          return versionConflict('La clínica', clinic.version);
+        }
+        const before = { additionalUsers: clinic.subscription.additionalUsers };
+        clinic.subscription.additionalUsers = body.data.additionalUsers;
+        clinic.version += 1;
+        audit(db, request, user, {
+          action: 'USER_QUOTA_CHANGED',
+          clinicId: clinic.id,
+          entityType: 'Subscription',
+          entityId: clinic.subscription.id,
+          before,
+          after: { additionalUsers: clinic.subscription.additionalUsers },
+          reason: body.data.reason,
+        });
+        return HttpResponse.json(clinicUserQuota(clinic));
       }),
     ),
 

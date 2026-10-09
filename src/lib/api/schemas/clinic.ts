@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isoDateTime, pageSchema, reasonSchema, versionSchema } from './common';
+import { planModuleSchema } from './plan';
 
 /**
  * Estado operativo de la clínica. El trial NO es un estado operativo: vive solo en la
@@ -28,6 +29,11 @@ export const subscriptionSchema = z.object({
   id: z.string(),
   planId: z.string(),
   planCode: z.string(),
+  planName: z.string(),
+  planDescription: z.string().nullable(),
+  catalogPlanVersion: versionSchema,
+  modules: z.array(planModuleSchema),
+  additionalUsers: z.number().int().nonnegative(),
   status: subscriptionStatusSchema,
   startsAt: isoDateTime,
   endsAt: isoDateTime.nullable(),
@@ -35,6 +41,32 @@ export const subscriptionSchema = z.object({
   trial: z.boolean(),
 });
 export type Subscription = z.infer<typeof subscriptionSchema>;
+
+export const clinicUserQuotaSchema = z.object({
+  clinicId: z.string(),
+  planCode: z.string().nullable(),
+  planLimit: z.number().int().nonnegative().nullable(),
+  additionalUsers: z.number().int().nonnegative(),
+  effectiveLimit: z.number().int().nonnegative().nullable(),
+  usedUsers: z.number().int().nonnegative(),
+  availableUsers: z.number().int().nonnegative().nullable(),
+  canAddUser: z.boolean(),
+  version: versionSchema,
+  subscriptionId: z.string().nullable(),
+  catalogPlanId: z.string().nullable(),
+  planName: z.string().nullable(),
+  planDescription: z.string().nullable(),
+  catalogPlanVersion: z.number().int().nonnegative(),
+  modules: z.array(planModuleSchema),
+});
+export type ClinicUserQuota = z.infer<typeof clinicUserQuotaSchema>;
+
+export const updateClinicUserQuotaInputSchema = z.object({
+  additionalUsers: z.number().int().nonnegative(),
+  reason: reasonSchema,
+  version: versionSchema,
+});
+export type UpdateClinicUserQuotaInput = z.infer<typeof updateClinicUserQuotaInputSchema>;
 
 export const clinicDetailSchema = clinicSummarySchema.extend({
   subscription: subscriptionSchema.nullable(),

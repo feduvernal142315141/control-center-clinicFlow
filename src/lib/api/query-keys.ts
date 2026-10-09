@@ -7,6 +7,8 @@ export const queryKeys = {
     all: ['platform', 'clinics'] as const,
     list: (query: ClinicListQuery) => ['platform', 'clinics', 'list', query] as const,
     detail: (clinicId: string) => ['platform', 'clinics', 'detail', clinicId] as const,
+    userQuota: (clinicId: string) =>
+      ['platform', 'clinics', 'detail', clinicId, 'user-quota'] as const,
     effectiveModules: (clinicId: string) =>
       ['platform', 'clinics', 'detail', clinicId, 'effective-modules'] as const,
     overrides: (clinicId: string) =>

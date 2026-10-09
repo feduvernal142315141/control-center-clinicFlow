@@ -29,6 +29,7 @@ import {
 } from './clinic-action-dialogs';
 import { ClinicOverridesTab } from './clinic-overrides-tab';
 import { ClinicStatusBadge, TrialBadge } from './clinic-status-badge';
+import { ClinicUserQuotaCard } from './clinic-user-quota-card';
 import { EffectiveModulesTable } from './effective-modules-table';
 
 const TABS = ['resumen', 'modulos', 'overrides', 'auditoria'] as const;
@@ -147,7 +148,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function ClinicSummary({ clinic }: { clinic: Clinic }) {
-  const { planName, specialtyName } = useCatalogNames();
+  const { specialtyName } = useCatalogNames();
   const s = clinic.subscription;
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -179,7 +180,7 @@ function ClinicSummary({ clinic }: { clinic: Clinic }) {
         <CardContent>
           {s ? (
             <dl className="grid gap-4 sm:grid-cols-2">
-              <Field label="Plan">{planName(s.planCode)}</Field>
+              <Field label="Plan">{s.planName}</Field>
               <Field label="Estado">
                 <span className="flex items-center gap-2">
                   {SUBSCRIPTION_STATUS_LABEL[s.status]}
@@ -189,6 +190,8 @@ function ClinicSummary({ clinic }: { clinic: Clinic }) {
               <Field label="Inicio">{formatDate(s.startsAt)}</Field>
               <Field label="Fin">{s.endsAt ? formatDate(s.endsAt) : 'Sin fecha de fin'}</Field>
               <Field label="Renovación">{formatDate(s.renewalDate)}</Field>
+              <Field label="Versión del plan">{s.catalogPlanVersion}</Field>
+              <Field label="Cupos adicionales">{s.additionalUsers}</Field>
             </dl>
           ) : (
             <p className="text-sm text-muted-foreground">
@@ -197,6 +200,7 @@ function ClinicSummary({ clinic }: { clinic: Clinic }) {
           )}
         </CardContent>
       </Card>
+      <ClinicUserQuotaCard clinicId={clinic.id} />
     </div>
   );
 }

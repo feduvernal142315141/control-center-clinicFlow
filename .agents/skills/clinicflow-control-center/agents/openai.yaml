@@ -1,0 +1,4 @@
+interface:
+  display_name: 'ClinicFlow Control Center'
+  short_description: 'Desarrollar el panel interno de ClinicFlow'
+  default_prompt: 'Usa $clinicflow-control-center para implementar el cambio solicitado siguiendo los contratos y patrones del repositorio.'

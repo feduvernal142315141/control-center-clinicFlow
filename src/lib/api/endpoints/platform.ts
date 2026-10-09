@@ -3,6 +3,7 @@ import { platformRequest } from '../client';
 import {
   auditLogPageSchema,
   clinicDetailSchema,
+  clinicUserQuotaSchema,
   clinicOverridesSchema,
   clinicPageSchema,
   dashboardSchema,
@@ -27,6 +28,7 @@ import {
   type PlanModulesInput,
   type PlanUpdateInput,
   type UpdateClinicInput,
+  type UpdateClinicUserQuotaInput,
 } from '../schemas';
 
 const clinicPath = (clinicId: string) => `/clinics/${encodeURIComponent(clinicId)}`;
@@ -45,6 +47,11 @@ export const platformApi = {
     platformRequest('/clinics', { query, schema: clinicPageSchema, signal }),
   getClinic: (clinicId: string, signal?: AbortSignal) =>
     platformRequest(clinicPath(clinicId), { schema: clinicDetailSchema, signal }),
+  getClinicUserQuota: (clinicId: string, signal?: AbortSignal) =>
+    platformRequest(`${clinicPath(clinicId)}/user-quota`, {
+      schema: clinicUserQuotaSchema,
+      signal,
+    }),
   createClinic: (input: CreateClinicInput) =>
     platformRequest('/clinics', { method: 'POST', body: input, schema: clinicDetailSchema }),
   updateClinic: (clinicId: string, input: UpdateClinicInput) =>
@@ -76,6 +83,12 @@ export const platformApi = {
       method: 'PUT',
       body: input,
       schema: clinicDetailSchema,
+    }),
+  updateClinicUserQuota: (clinicId: string, input: UpdateClinicUserQuotaInput) =>
+    platformRequest(`${clinicPath(clinicId)}/user-quota`, {
+      method: 'PUT',
+      body: input,
+      schema: clinicUserQuotaSchema,
     }),
   /** Con `preview`, el backend devuelve cómo quedarían los módulos sin guardar nada. */
   effectiveModules: (clinicId: string, preview?: EffectivePreviewQuery, signal?: AbortSignal) =>

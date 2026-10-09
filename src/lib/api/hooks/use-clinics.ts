@@ -12,6 +12,7 @@ import type {
   ClinicStatusInput,
   EffectivePreviewQuery,
   UpdateClinicInput,
+  UpdateClinicUserQuotaInput,
 } from '../schemas';
 
 export function useDashboard() {
@@ -34,6 +35,14 @@ export function useClinic(clinicId: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.clinics.detail(clinicId),
     queryFn: ({ signal }) => platformApi.getClinic(clinicId, signal),
+    enabled: enabled && !!clinicId,
+  });
+}
+
+export function useClinicUserQuota(clinicId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.clinics.userQuota(clinicId),
+    queryFn: ({ signal }) => platformApi.getClinicUserQuota(clinicId, signal),
     enabled: enabled && !!clinicId,
   });
 }
@@ -119,6 +128,24 @@ export function useChangeSpecialty(clinicId: string) {
     mutationFn: (input: ChangeSpecialtyInput) => platformApi.changeSpecialty(clinicId, input),
     meta: { errorToast: 'No se pudo cambiar la especialidad' },
     onSuccess: invalidate,
+  });
+}
+
+export function useUpdateClinicUserQuota(clinicId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateClinicUserQuotaInput) =>
+      platformApi.updateClinicUserQuota(clinicId, input),
+    meta: { errorToast: false },
+    onSuccess: (saved) => {
+      qc.setQueryData(queryKeys.clinics.userQuota(clinicId), saved);
+      return Promise.all([
+        qc.invalidateQueries({ queryKey: queryKeys.clinics.detail(clinicId) }),
+        qc.invalidateQueries({ queryKey: queryKeys.clinics.all }),
+        qc.invalidateQueries({ queryKey: queryKeys.dashboard }),
+        qc.invalidateQueries({ queryKey: queryKeys.auditLogs }),
+      ]);
+    },
   });
 }
 

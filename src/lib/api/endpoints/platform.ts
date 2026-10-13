@@ -29,7 +29,9 @@ import {
   type PlanUpdateInput,
   type UpdateClinicInput,
   type UpdateClinicUserQuotaInput,
+  type SystemErrorLogQuery,
 } from '../schemas';
+import { systemErrorLogPageSchema } from '../schemas';
 
 const clinicPath = (clinicId: string) => `/clinics/${encodeURIComponent(clinicId)}`;
 
@@ -115,6 +117,8 @@ export const platformApi = {
     platformRequest('/audit-logs', { query, schema: auditLogPageSchema, signal }),
   listUsers: (signal?: AbortSignal) =>
     platformRequest('/users', { schema: z.array(platformUserSchema), signal }),
+  systemErrorLogs: (query: SystemErrorLogQuery, signal?: AbortSignal) =>
+    platformRequest('/system-error-logs', { query, schema: systemErrorLogPageSchema, signal }),
 
   // ---- Planes ----
   listPlans: (signal?: AbortSignal) =>

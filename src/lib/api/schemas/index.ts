@@ -7,3 +7,4 @@ export * from './effective-module';
 export * from './module';
 export * from './plan';
 export * from './specialty';
+export * from './system-errors';

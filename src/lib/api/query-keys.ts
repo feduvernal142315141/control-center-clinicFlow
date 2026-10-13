@@ -1,4 +1,4 @@
-import type { AuditLogQuery, ClinicListQuery, EffectivePreviewQuery } from './schemas';
+import type { AuditLogQuery, ClinicListQuery, EffectivePreviewQuery, SystemErrorLogQuery } from './schemas';
 
 export const queryKeys = {
   me: ['platform', 'me'] as const,
@@ -24,4 +24,5 @@ export const queryKeys = {
   auditLogs: ['platform', 'audit-logs'] as const,
   auditLogList: (query: AuditLogQuery) => ['platform', 'audit-logs', query] as const,
   users: ['platform', 'users'] as const,
+  systemErrorLogs: (query: SystemErrorLogQuery) => ['platform', 'system-error-logs', query] as const,
 };

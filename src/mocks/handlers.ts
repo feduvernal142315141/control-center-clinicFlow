@@ -1071,6 +1071,28 @@ export function createPlatformHandlers(
       }),
     ),
 
+    // ---- Errores del sistema ----
+    http.get(
+      u('/system-error-logs'),
+      authed(({ db, request }) => {
+        const url = new URL(request.url);
+        const filters = url.searchParams.getAll('filters');
+        const clinicId = filters.find((filter) => filter.startsWith('clinicId__'))?.split('__').at(2)?.replace('UUID:', '');
+        const userId = filters.find((filter) => filter.startsWith('userId__'))?.split('__').at(2)?.replace('UUID:', '');
+        const exceptionClass = filters.find((filter) => filter.startsWith('exceptionClass__'))?.split('__').at(2)?.toLowerCase();
+        const content = [
+          {
+            id: 'error-e-1', occurredAt: '2026-10-12T15:20:00Z', clinicId: 'c-darmas',
+            clinicName: findClinic(db, 'c-darmas')?.name ?? null, userId: 'u-admin',
+            userEmail: 'admin@kodewave.com', exceptionClass: 'NullPointerException',
+            message: 'Unexpected null value', stackTrace: 'java.lang.NullPointerException\n\tat Example.service(Example.java:42)',
+            httpStatus: 500, requestMethod: 'GET', requestPath: '/api/v1/patients', source: 'CLINIC_API',
+          },
+        ].filter((error) => (!clinicId || error.clinicId === clinicId) && (!userId || error.userId === userId) && (!exceptionClass || error.exceptionClass.toLowerCase().includes(exceptionClass)));
+        return HttpResponse.json({ content, nextCursor: null, hasNext: false });
+      }),
+    ),
+
     // Usuarios KodeWave, para el filtro de actor de la auditoría.
     http.get(
       u('/users'),

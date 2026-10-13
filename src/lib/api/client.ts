@@ -3,7 +3,7 @@ import { API_ERROR_CODES, ApiError, apiErrorFromResponse } from './errors';
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
-type Query = Record<string, string | number | boolean | null | undefined>;
+type Query = Record<string, string | number | boolean | readonly string[] | null | undefined>;
 
 interface RequestOptions<S extends z.ZodType | undefined> {
   method?: Method;
@@ -19,8 +19,11 @@ type Result<S> = S extends z.ZodType ? z.infer<S> : void;
 function buildUrl(base: string, path: string, query?: Query): URL {
   const url = new URL(`${base}${path}`, globalThis.location?.origin ?? 'http://localhost');
   for (const [key, value] of Object.entries(query ?? {})) {
-    if (value !== undefined && value !== null && value !== '')
+    if (Array.isArray(value)) {
+      value.forEach((item) => url.searchParams.append(key, item));
+    } else if (value !== undefined && value !== null && value !== '') {
       url.searchParams.set(key, String(value));
+    }
   }
   return url;
 }

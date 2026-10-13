@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   type LucideIcon,
   ScrollText,
+  Bug,
   Stethoscope,
   Tags,
 } from 'lucide-react';
@@ -37,7 +38,10 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: 'Control',
-    items: [{ href: '/auditoria', label: 'Auditoría', icon: ScrollText }],
+    items: [
+      { href: '/auditoria', label: 'Auditoría', icon: ScrollText },
+      { href: '/errores-sistema', label: 'Errores del sistema', icon: Bug },
+    ],
   },
 ];
 
@@ -54,6 +58,7 @@ export const SEGMENT_LABELS: Record<string, string> = {
   modulos: 'Módulos',
   especialidades: 'Especialidades',
   auditoria: 'Auditoría',
+  'errores-sistema': 'Errores del sistema',
   nueva: 'Nueva',
   nuevo: 'Nuevo',
 };

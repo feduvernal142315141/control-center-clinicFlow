@@ -1,34 +1,77 @@
 'use client';
-import { useState } from 'react';
-import { useSystemErrorLogs } from '@/lib/api/hooks/use-system-errors';
-import { useClinics } from '@/lib/api/hooks/use-clinics';
-import type { SystemErrorLogQuery } from '@/lib/api/schemas';
-import { formatDateTime } from '@/lib/format';
+
+import { useMemo, useState } from 'react';
+import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { EmptyState } from '@/components/states/empty-state';
+import { ErrorState } from '@/components/states/error-state';
+import { LoadingState } from '@/components/states/loading-state';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { EmptyState } from '@/components/states/empty-state';
-import { ErrorState } from '@/components/states/error-state';
-import { LoadingState } from '@/components/states/loading-state';
+import { useClinics } from '@/lib/api/hooks/use-clinics';
+import { usePlatformUsers } from '@/lib/api/hooks/use-audit';
+import { useSystemErrorLogs } from '@/lib/api/hooks/use-system-errors';
+import type { SystemErrorLogQuery } from '@/lib/api/schemas';
+import { formatDateTime } from '@/lib/format';
+import { useSearchParamsUpdater } from '@/lib/use-search-params-updater';
 
-const SIZE = 20;
+const PAGE_SIZE = 20;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function useErrorFilters() {
+  const params = useSearchParams();
+  const replaceParams = useSearchParamsUpdater();
+  const filters = useMemo(() => ({
+    clinicId: params.get('clinicId') ?? '', userId: params.get('userId') ?? '',
+    exceptionClass: params.get('exceptionClass') ?? '', from: DATE_RE.test(params.get('from') ?? '') ? params.get('from')! : '',
+    to: DATE_RE.test(params.get('to') ?? '') ? params.get('to')! : '', cursor: params.get('cursor') ?? undefined,
+  }), [params]);
+  const update = (patch: Partial<typeof filters>) => replaceParams((next) => {
+    if (!('cursor' in patch)) next.delete('cursor');
+    for (const [key, value] of Object.entries(patch)) {
+      if (!value) next.delete(key); else next.set(key, String(value));
+    }
+  });
+  const queryFilters = [
+    filters.clinicId && `clinicId__EQ__UUID:${filters.clinicId}`,
+    filters.userId && `userId__EQ__UUID:${filters.userId}`,
+    filters.exceptionClass && `exceptionClass__CONTAINS_IGNORE_CASE__${filters.exceptionClass}`,
+    filters.from && `occurredAt__GTE__DATE_TIME:${filters.from} 00:00:00`,
+    filters.to && `occurredAt__LTE__DATE_TIME:${filters.to} 23:59:59`,
+    filters.cursor && `cursor__EQ__${filters.cursor}`,
+  ].filter((value): value is string => Boolean(value));
+  const query: SystemErrorLogQuery = {
+    filters: queryFilters, page: 0, pageSize: PAGE_SIZE,
+  };
+  return { filters, update, query };
+}
+
 export function SystemErrorLogView() {
-  const clinics = useClinics({ page: 0, size: 100 });
-  const [filters, setFilters] = useState({ clinicId: '', exceptionClass: '', cursor: undefined as string | undefined });
-  const query: SystemErrorLogQuery = { clinicId: filters.clinicId || undefined, exceptionClass: filters.exceptionClass || undefined, cursor: filters.cursor, size: SIZE };
+  const { filters, update, query } = useErrorFilters();
   const logs = useSystemErrorLogs(query);
-  const update = (patch: Partial<typeof filters>) => setFilters((current) => ({ ...current, ...patch, cursor: patch.cursor }));
+  const clinics = useClinics({ page: 0, size: 100 });
+  const users = usePlatformUsers();
+  const [cursorHistory, setCursorHistory] = useState<string[]>([]);
+  const hasFilters = Object.entries(filters).some(([key, value]) => key !== 'cursor' && Boolean(value));
+  const clear = () => { setCursorHistory([]); update({ clinicId: '', userId: '', exceptionClass: '', from: '', to: '', cursor: undefined }); };
+  const next = () => { if (!logs.data?.nextCursor) return; setCursorHistory((history) => [...history, filters.cursor ?? '']); update({ cursor: logs.data.nextCursor }); };
+  const previous = () => { const history = [...cursorHistory]; const cursor = history.pop(); setCursorHistory(history); update({ cursor: cursor || undefined }); };
+
   return <div className="space-y-4">
     <div className="flex flex-wrap items-end gap-3">
-      <div className="w-64 space-y-1"><Label htmlFor="error-clinic">Clínica</Label><NativeSelect id="error-clinic" value={filters.clinicId} onChange={(e) => update({ clinicId: e.target.value, cursor: undefined })}><option value="">Todas</option>{clinics.data?.content.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</NativeSelect></div>
-      <div className="w-72 space-y-1"><Label htmlFor="error-class">Clase o paquete</Label><Input id="error-class" value={filters.exceptionClass} placeholder="NullPointerException" onChange={(e) => update({ exceptionClass: e.target.value, cursor: undefined })} onKeyDown={(e) => { if (e.key === 'Enter') logs.refetch(); }} /></div>
-      {(filters.clinicId || filters.exceptionClass) && <Button variant="ghost" onClick={() => setFilters({ clinicId: '', exceptionClass: '', cursor: undefined })}>Limpiar filtros</Button>}
+      <div className="w-56 space-y-1"><Label htmlFor="error-clinic">Clínica</Label><NativeSelect id="error-clinic" value={filters.clinicId} onChange={(e) => update({ clinicId: e.target.value })}><option value="">Todas</option>{clinics.data?.content.map((clinic) => <option key={clinic.id} value={clinic.id}>{clinic.name}</option>)}</NativeSelect></div>
+      <div className="w-56 space-y-1"><Label htmlFor="error-user">Usuario</Label><NativeSelect id="error-user" value={filters.userId} onChange={(e) => update({ userId: e.target.value })}><option value="">Todos</option>{users.data?.map((user) => <option key={user.id} value={user.id}>{user.email}</option>)}</NativeSelect></div>
+      <div className="w-64 space-y-1"><Label htmlFor="error-class">Clase o paquete</Label><Input id="error-class" value={filters.exceptionClass} onChange={(e) => update({ exceptionClass: e.target.value })} placeholder="NullPointerException" /></div>
+      <div className="space-y-1"><Label htmlFor="error-from">Desde</Label><Input id="error-from" type="date" value={filters.from} max={filters.to || undefined} onChange={(e) => update({ from: e.target.value })} /></div>
+      <div className="space-y-1"><Label htmlFor="error-to">Hasta</Label><Input id="error-to" type="date" value={filters.to} min={filters.from || undefined} onChange={(e) => update({ to: e.target.value })} /></div>
+      {hasFilters && <Button variant="ghost" onClick={clear}><X /> Limpiar filtros</Button>}
     </div>
-    {logs.isError ? <ErrorState error={logs.error} onRetry={() => logs.refetch()} /> : !logs.data ? <LoadingState rows={8} label="Cargando errores…" /> : logs.data.content.length === 0 ? <EmptyState title="No hay errores registrados" /> : <>
+    {logs.isError ? <ErrorState error={logs.error} onRetry={() => logs.refetch()} /> : !logs.data ? <LoadingState rows={8} label="Cargando errores del sistema…" /> : logs.data.content.length === 0 ? <EmptyState title={hasFilters ? 'Ningún error coincide con los filtros' : 'Todavía no hay errores registrados'} /> : <>
       <div className={logs.isFetching ? 'opacity-60 transition-opacity' : undefined}><Table><caption className="sr-only">Errores del sistema</caption><TableHeader><TableRow><TableHead>Fecha</TableHead><TableHead>Clínica</TableHead><TableHead>Usuario</TableHead><TableHead>Excepción</TableHead><TableHead>Ruta</TableHead><TableHead>Detalle</TableHead></TableRow></TableHeader><TableBody>{logs.data.content.map((log) => <TableRow key={log.id}><TableCell className="whitespace-nowrap text-sm">{formatDateTime(log.occurredAt)}</TableCell><TableCell className="text-sm">{log.clinicName ?? 'Plataforma'}</TableCell><TableCell className="text-sm">{log.userEmail ?? 'Anónimo'}</TableCell><TableCell><p className="max-w-72 truncate text-sm font-medium" title={log.exceptionClass}>{log.exceptionClass}</p><code className="text-xs text-muted-foreground">HTTP {log.httpStatus}</code></TableCell><TableCell className="max-w-64 truncate text-sm" title={log.requestPath ?? ''}>{log.requestMethod} {log.requestPath}</TableCell><TableCell><details><summary className="cursor-pointer text-sm text-primary">Ver stack trace</summary><pre className="mt-2 max-h-64 max-w-xl overflow-auto whitespace-pre-wrap rounded bg-muted p-3 text-xs">{log.stackTrace}</pre></details></TableCell></TableRow>)}</TableBody></Table></div>
-      <div className="flex justify-end gap-2"><Button variant="outline" disabled={!filters.cursor || logs.isFetching} onClick={() => setFilters((f) => ({ ...f, cursor: undefined }))}>Primera</Button><Button disabled={!logs.data.hasNext || logs.isFetching} onClick={() => setFilters((f) => ({ ...f, cursor: logs.data.nextCursor ?? undefined }))}>Siguiente</Button></div>
+      <div className="flex justify-end gap-2"><Button variant="outline" disabled={!cursorHistory.length || logs.isFetching} onClick={previous}><ChevronLeft /> Anterior</Button><Button disabled={!logs.data.hasNext || logs.isFetching} onClick={next}>Siguiente <ChevronRight /></Button></div>
     </>}
   </div>;
 }

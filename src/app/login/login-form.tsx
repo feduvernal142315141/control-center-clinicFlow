@@ -3,12 +3,12 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation } from '@tanstack/react-query';
 import { AlertTriangle, Info, Loader2, ShieldCheck } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { authApi } from '@/lib/api/endpoints/auth';
 import { API_ERROR_CODES, errorMessage, fieldErrorsOf, isApiError } from '@/lib/api/errors';
@@ -20,6 +20,7 @@ import {
   type MfaInput,
 } from '@/lib/api/schemas';
 import { applyFieldErrors } from '@/lib/forms';
+import { hardNavigate } from '@/lib/navigation';
 
 function FormError({ error }: { error: unknown }) {
   if (!error) return null;
@@ -40,12 +41,11 @@ export function LoginForm({
   nextPath: string;
   notice?: string;
 }) {
-  const router = useRouter();
   const [step, setStep] = useState<'credentials' | 'mfa'>('credentials');
 
-  // Sin router.refresh(): no hay datos de servidor que dependan de la sesión y el refresh
-  // compite con la primera navegación del usuario.
-  const onAuthenticated = () => router.replace(nextPath);
+  // Navegación completa: el router de Next podría reutilizar una respuesta en caché de
+  // cuando la ruta redirigía a /login (sin sesión).
+  const onAuthenticated = () => hardNavigate(nextPath);
 
   const handleResult = (result: BffAuthResult) => {
     if (result.status === 'AUTHENTICATED') return onAuthenticated();
@@ -118,9 +118,8 @@ function CredentialsStep({ onResult }: { onResult: (r: BffAuthResult) => void })
       </div>
       <div className="space-y-2">
         <Label htmlFor="password">Contraseña</Label>
-        <Input
+        <PasswordInput
           id="password"
-          type="password"
           autoComplete="current-password"
           aria-invalid={!!errors.password}
           aria-describedby={errors.password ? 'password-error' : undefined}

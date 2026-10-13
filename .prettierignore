@@ -1,5 +1,6 @@
 node_modules
 .next
+.next-e2e
 pnpm-lock.yaml
 pnpm-workspace.yaml
 playwright-report

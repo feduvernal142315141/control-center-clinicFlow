@@ -59,6 +59,10 @@ export const seedUsers: MockUser[] = [
   },
 ];
 
+export const seedClinicUsers = [
+  { id: 'u-clinic-darmas', email: 'doctor@darmas.example' },
+];
+
 /** Las cuentas (clínicas, módulos) las calcula el handler. */
 export type SpecialtyRow = Omit<Specialty, 'clinicCount' | 'compatibleModuleCount'>;
 

@@ -39,6 +39,14 @@ export function useClinic(clinicId: string, enabled = true) {
   });
 }
 
+export function useClinicUsers(clinicId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.clinics.users(clinicId),
+    queryFn: ({ signal }) => platformApi.getClinicUsers(clinicId, signal),
+    enabled: enabled && !!clinicId,
+  });
+}
+
 export function useClinicUserQuota(clinicId: string, enabled = true) {
   return useQuery({
     queryKey: queryKeys.clinics.userQuota(clinicId),

@@ -107,7 +107,10 @@ describe('escenarios de módulos efectivos', () => {
 describe('handlers', () => {
   it('system error logs supports filters and keyset response', async () => {
     const token = await login();
-    const res = await call('/system-error-logs?filters=exceptionClass__CONTAINS_IGNORE_CASE__NullPointer&pageSize=20', { token });
+    const res = await call(
+      '/system-error-logs?filters=exceptionClass__CONTAINS_IGNORE_CASE__NullPointer&pageSize=20',
+      { token },
+    );
     expect(res.status).toBe(200);
     systemErrorLogPageSchema.parse(await res.json());
   });

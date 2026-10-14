@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { platformRequest } from '../client';
 import {
   auditLogPageSchema,
+  clinicUserSchema,
   clinicDetailSchema,
   clinicUserQuotaSchema,
   clinicOverridesSchema,
@@ -49,6 +50,8 @@ export const platformApi = {
     platformRequest('/clinics', { query, schema: clinicPageSchema, signal }),
   getClinic: (clinicId: string, signal?: AbortSignal) =>
     platformRequest(clinicPath(clinicId), { schema: clinicDetailSchema, signal }),
+  getClinicUsers: (clinicId: string, signal?: AbortSignal) =>
+    platformRequest(`${clinicPath(clinicId)}/users`, { schema: z.array(clinicUserSchema), signal }),
   getClinicUserQuota: (clinicId: string, signal?: AbortSignal) =>
     platformRequest(`${clinicPath(clinicId)}/user-quota`, {
       schema: clinicUserQuotaSchema,

@@ -22,7 +22,7 @@ import {
   type Plan,
   type PlatformMe,
 } from '@/lib/api/schemas';
-import { MOCK_TOTP_CODE, type MockUser } from './data';
+import { MOCK_TOTP_CODE, seedClinicUsers, type MockUser } from './data';
 import { getDb, nextId, type MockDb, type StoredAuditLog } from './db';
 import { findDependencyCycle, resolveEffectiveModules } from './effective';
 
@@ -1073,22 +1073,64 @@ export function createPlatformHandlers(
 
     // ---- Errores del sistema ----
     http.get(
+      u('/clinics/:clinicId/users'),
+      authed(() => HttpResponse.json(seedClinicUsers)),
+    ),
+    http.get(
       u('/system-error-logs'),
       authed(({ db, request }) => {
         const url = new URL(request.url);
         const filters = url.searchParams.getAll('filters');
-        const clinicId = filters.find((filter) => filter.startsWith('clinicId__'))?.split('__').at(2)?.replace('UUID:', '');
-        const userId = filters.find((filter) => filter.startsWith('userId__'))?.split('__').at(2)?.replace('UUID:', '');
-        const exceptionClass = filters.find((filter) => filter.startsWith('exceptionClass__'))?.split('__').at(2)?.toLowerCase();
+        const clinicId = filters
+          .find((filter) => filter.startsWith('clinicId__'))
+          ?.split('__')
+          .at(2)
+          ?.replace('UUID:', '');
+        const userId = filters
+          .find((filter) => filter.startsWith('userId__'))
+          ?.split('__')
+          .at(2)
+          ?.replace('UUID:', '');
+        const exceptionClass = filters
+          .find((filter) => filter.startsWith('exceptionClass__'))
+          ?.split('__')
+          .at(2)
+          ?.toLowerCase();
+        const requestPath = filters
+          .find((filter) => filter.startsWith('requestPath__'))
+          ?.split('__')
+          .at(2)
+          ?.toLowerCase();
+        const operationName = filters
+          .find((filter) => filter.startsWith('operationName__'))
+          ?.split('__')
+          .at(2)
+          ?.toLowerCase();
         const content = [
           {
-            id: 'error-e-1', occurredAt: '2026-10-12T15:20:00Z', clinicId: 'c-darmas',
-            clinicName: findClinic(db, 'c-darmas')?.name ?? null, userId: 'u-admin',
-            userEmail: 'admin@kodewave.com', exceptionClass: 'NullPointerException',
-            message: 'Unexpected null value', stackTrace: 'java.lang.NullPointerException\n\tat Example.service(Example.java:42)',
-            httpStatus: 500, requestMethod: 'GET', requestPath: '/api/v1/patients', source: 'CLINIC_API',
+            id: 'error-e-1',
+            occurredAt: '2026-10-12T15:20:00Z',
+            clinicId: 'c-darmas',
+            clinicName: findClinic(db, 'c-darmas')?.name ?? null,
+            userId: 'u-clinic-darmas',
+            userEmail: 'doctor@darmas.example',
+            exceptionClass: 'NullPointerException',
+            message: 'Unexpected null value',
+            stackTrace: 'java.lang.NullPointerException\n\tat Example.service(Example.java:42)',
+            httpStatus: 500,
+            requestMethod: 'GET',
+            requestPath: '/api/v1/patients',
+            operationName: 'GetPatientsQuery',
+            source: 'CLINIC_API',
           },
-        ].filter((error) => (!clinicId || error.clinicId === clinicId) && (!userId || error.userId === userId) && (!exceptionClass || error.exceptionClass.toLowerCase().includes(exceptionClass)));
+        ].filter(
+          (error) =>
+            (!clinicId || error.clinicId === clinicId) &&
+            (!userId || error.userId === userId) &&
+            (!exceptionClass || error.exceptionClass.toLowerCase().includes(exceptionClass)) &&
+            (!requestPath || error.requestPath.toLowerCase().includes(requestPath)) &&
+            (!operationName || error.operationName.toLowerCase().includes(operationName)),
+        );
         return HttpResponse.json({ content, nextCursor: null, hasNext: false });
       }),
     ),

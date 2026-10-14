@@ -5,5 +5,9 @@ import { queryKeys } from '../query-keys';
 import type { SystemErrorLogQuery } from '../schemas';
 
 export function useSystemErrorLogs(query: SystemErrorLogQuery) {
-  return useQuery({ queryKey: queryKeys.systemErrorLogs(query), queryFn: ({ signal }) => platformApi.systemErrorLogs(query, signal), placeholderData: keepPreviousData });
+  return useQuery({
+    queryKey: queryKeys.systemErrorLogs(query),
+    queryFn: ({ signal }) => platformApi.systemErrorLogs(query, signal),
+    placeholderData: keepPreviousData,
+  });
 }

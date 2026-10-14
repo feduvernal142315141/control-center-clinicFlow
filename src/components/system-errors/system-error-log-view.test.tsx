@@ -18,19 +18,35 @@ beforeEach(() => {
 });
 
 describe('SystemErrorLogView', () => {
-  it('muestra contexto del error y permite expandir el stack trace', async () => {
+  it('muestra una vista previa y permite copiar el stack trace completo', async () => {
     renderWithClient(<SystemErrorLogView />);
     expect(await screen.findByText('NullPointerException')).toBeInTheDocument();
-    expect(screen.getAllByText('Clínica Dental D\'Armas').length).toBeGreaterThan(1);
-    expect(screen.getByText('Ver stack trace')).toBeInTheDocument();
+    expect(screen.getAllByText("Clínica Dental D'Armas").length).toBeGreaterThan(1);
+    expect(
+      screen.getByRole('button', { name: 'Copiar stack trace de NullPointerException' }),
+    ).toBeInTheDocument();
+  });
+
+  it('copia el stack trace completo', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderWithClient(<SystemErrorLogView />);
+    await screen.findByText('NullPointerException');
+    fireEvent.click(screen.getByRole('button', { name: 'Copiar stack trace de NullPointerException' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Example.service')));
+    expect(await screen.findByText('Copiado')).toBeInTheDocument();
   });
 
   it('envía el filtro de clase al endpoint', async () => {
     renderWithClient(<SystemErrorLogView />);
     await screen.findByText('NullPointerException');
-    fireEvent.change(screen.getByLabelText('Clase o paquete'), { target: { value: 'NullPointer' } });
-    await waitFor(() => expect(nav.replace).toHaveBeenLastCalledWith(
-      '/errores-sistema?exceptionClass=NullPointer', { scroll: false },
-    ));
+    fireEvent.change(screen.getByLabelText('Clase o paquete'), {
+      target: { value: 'NullPointer' },
+    });
+    await waitFor(() =>
+      expect(nav.replace).toHaveBeenLastCalledWith('/errores-sistema?exceptionClass=NullPointer', {
+        scroll: false,
+      }),
+    );
   });
 });

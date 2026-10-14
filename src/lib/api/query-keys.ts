@@ -1,4 +1,9 @@
-import type { AuditLogQuery, ClinicListQuery, EffectivePreviewQuery, SystemErrorLogQuery } from './schemas';
+import type {
+  AuditLogQuery,
+  ClinicListQuery,
+  EffectivePreviewQuery,
+  SystemErrorLogQuery,
+} from './schemas';
 
 export const queryKeys = {
   me: ['platform', 'me'] as const,
@@ -7,6 +12,7 @@ export const queryKeys = {
     all: ['platform', 'clinics'] as const,
     list: (query: ClinicListQuery) => ['platform', 'clinics', 'list', query] as const,
     detail: (clinicId: string) => ['platform', 'clinics', 'detail', clinicId] as const,
+    users: (clinicId: string) => ['platform', 'clinics', 'detail', clinicId, 'users'] as const,
     userQuota: (clinicId: string) =>
       ['platform', 'clinics', 'detail', clinicId, 'user-quota'] as const,
     effectiveModules: (clinicId: string) =>
@@ -24,5 +30,6 @@ export const queryKeys = {
   auditLogs: ['platform', 'audit-logs'] as const,
   auditLogList: (query: AuditLogQuery) => ['platform', 'audit-logs', query] as const,
   users: ['platform', 'users'] as const,
-  systemErrorLogs: (query: SystemErrorLogQuery) => ['platform', 'system-error-logs', query] as const,
+  systemErrorLogs: (query: SystemErrorLogQuery) =>
+    ['platform', 'system-error-logs', query] as const,
 };
